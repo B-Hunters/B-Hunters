@@ -84,13 +84,13 @@ class BHunters(Karton):
         # Try connecting using HTTPS with verification disabled
         try:
             # Disable certificate verification with verify=False
-            requests.get(url, verify=False)
+            requests.get(url, verify=False,timeout=5)
             return url  # If it responds, return the HTTPS URL
         except requests.exceptions.RequestException:
             # If the HTTPS request fails, attempt with HTTP
             http_url = url.replace("https://", "http://")
             try:
-                requests.get(http_url)
+                requests.get(http_url,timeout=5)
                 return http_url  # If it responds, return the HTTP URL
             except requests.exceptions.RequestException:
                 return url  # Return None if both HTTPS and HTTP fail
