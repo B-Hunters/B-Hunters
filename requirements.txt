@@ -1,0 +1,4 @@
+karton-core==5.5.0
+pymongo
+tldextract
+requests
