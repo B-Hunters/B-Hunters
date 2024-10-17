@@ -1,0 +1,4 @@
+rebuildandpush.sh
+*.egg-info
+dist/
+build/
