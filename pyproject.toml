@@ -1,6 +1,0 @@
-[project]
-name = "B_Hunters"
-version = "1.0.3"
-description = "Modified Karton module for Bug Bounty Automation and seperation"
-dependencies = [
-    "karton-core==5.5.0"]
