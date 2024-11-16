@@ -9,7 +9,8 @@ import json
 import pymongo
 import tldextract
 import re
-
+import base64
+import hashlib
 class BHunters(Karton):
     def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
         config = Config(path="/etc/b-hunters/b-hunters.ini")
@@ -17,30 +18,39 @@ class BHunters(Karton):
         self.db=self.monogocon()
     
     def update_task_status(self,url,status):
-        collection=self.db["Domains"]
-        update_result = collection.update_one(
-        {
-            "Domain": url,
-            "data.key": self.identity  # Check if the key exists in the array
-        },
-        {
-            "$set": {"data.$.value": status}  # Update the value if key exists
-        }
-        )
-
-        # If no key was found and updated, add the new key-value pair
-        if update_result.matched_count == 0:
+        collection=self.db["domains"]
+        if status == "Started":
             collection.update_one(
                 {
-                    "Domain": url,
-                    "data.key": {"$ne": self.identity}  # Ensure the key doesn't exist
+                    "Domain": url
                 },
                 {
-                    "$addToSet": {"data": {"key": self.identity, "value": status}}  # Add new key-value pair
+                    "$addToSet": {"status.processing": self.identity}
+                }
+            )
+        elif status == "Finished":
+            collection.update_one(
+                {
+                    "Domain": url
+                },
+                {
+                    "$pull": {"status.processing": self.identity},
+                    "$addToSet": {"status.finished": self.identity}
+                }
+            )
+        elif status == "Failed":
+            collection.update_one(
+                {
+                    "Domain": url
+                },
+                {
+                    "$pull": {"status.processing": self.identity},
+                    "$addToSet": {"status.failed": self.identity}
                 }
             )
         self.send_discord_webhook(f"{self.identity} Started processing {url}",f"Status {status}","status")     
-
+        if status=="failed":
+            raise Exception(f"Failed to process {url}")
         
     def is_string(self,var):
         return isinstance(var, str)
@@ -129,6 +139,7 @@ class BHunters(Karton):
             "Content-Type": "application/json"
         }
         response = requests.post(webhook_url, data=json.dumps(data), headers=headers)
+        
 
 
     def monogocon(self):
@@ -149,5 +160,35 @@ class BHunters(Karton):
 
         db = client[db]
         return db    
-
- 
+    def checklinksexist(self,subdomain,links):
+        collection=self.db["domains"]
+        missing_links=[]
+        if isinstance(links,str):
+            links=links.splitlines()
+        existing_document = collection.find_one({"Domain": subdomain})
+        if existing_document is None:
+            self.log.error("No document found for the specified domain.")
+            
+        else:
+            existing_links = existing_document.get("ScanLinks", {}).get(self.identity, [])
+            missing_links = [link for link in links if link not in existing_links]
+            if missing_links:
+                collection.update_one({"Domain": subdomain}, {"$push": {f"ScanLinks.{self.identity}": {"$each": missing_links}}})
+        return missing_links    
+    def encode_filename(self, url_or_path):
+        """
+        Encodes a URL or path to be a valid filename by replacing unsupported characters.
+        """
+        # Define characters that are not typically allowed in filenames
+        invalid_chars = r'[<>:"/\\|?*]'
+        
+        # Replace invalid characters with underscores
+        safe_name = re.sub(invalid_chars, '_', url_or_path)
+        
+        # Ensure the filename isn't too long (max 255 characters is a common limit)
+        if len(safe_name) > 255:
+            # If it's too long, hash it to ensure uniqueness
+            hash_object = hashlib.md5(url_or_path.encode())
+            safe_name = hash_object.hexdigest()
+        
+        return safe_name

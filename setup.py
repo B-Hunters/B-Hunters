@@ -14,7 +14,7 @@ with open(version_path) as f:
 setup(
     name="b_hunters",
     version=version_info["__version__"],
-    description="Modified Karton Core for Bug Bounty Automation and seperation",
+    description="**B-Hunters** is a bug bounty framework built on the Karton",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     namespace_packages=["b_hunters"],
@@ -27,4 +27,9 @@ setup(
         "License :: OSI Approved :: BSD License",
     ],
     python_requires='>=3.8',
+    entry_points={
+        'console_scripts': [
+            'b-hunters=b_hunters.cli:main',  
+        ],},
+
 )
