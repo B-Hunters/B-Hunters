@@ -210,102 +210,109 @@ def generate_report(domain, output=None):
             logging.error(f"{Fore.RED}Aborting")
             exit()
     files=getfilesnames()
+    subdomains=[]
     for document in documents:
-        domain=document["Domain"]
-        logging.info(f"{Fore.MAGENTA}Creating report for domain {domain}")
-
-        outputfolder=os.path.join(output, domain)
-        if not os.path.exists(f"{outputfolder}"):
-            os.makedirs(f"{outputfolder}")
-
-        domain_files=[]
-        for i in files:
+        subdomains.append(document["Domain"])
+        if document["active"]==True:
             
-            if domain in i:
-                domain_files.append(i)
-        for i in domain_files:
-            data=s3.get_object(Bucket="bhunters", Key=i)["Body"]
-            foldername=i.split("_")[0]
-            outputfoldertool=os.path.join(outputfolder,foldername)
-            if not os.path.exists(f"{outputfoldertool}"):
-                os.makedirs(f"{outputfoldertool}")
-            outputfile=os.path.join(outputfoldertool,"_".join(i.split("_")[1:])+".txt")
-            with open(outputfile, "wb") as f:
-                f.write(data.read())
-        Ports=document["Ports"]
-        if Ports:
-            ports_data = json.dumps(Ports, indent=4)
-            outputfile=os.path.join(outputfolder,"ports.json")
-            with open(outputfile, "w") as f:
-                f.write(ports_data)
-        Technology=document["Technology"]
-        if Technology:
-            technology_data = json.dumps(Technology, indent=4)
-            outputfile=os.path.join(outputfolder,"technology.json")
-            with open(outputfile, "w") as f:
-                f.write(technology_data)
-        Vulns=document["Vulns"]
-        vulnsdirs=Vulns.keys()
-        vulnsdir=os.path.join(outputfolder,"vulns")
-        if not os.path.exists(f"{vulnsdir}"):
-            os.makedirs(f"{vulnsdir}")
-        for i in vulnsdirs:
-            vulns_data = json.dumps(Vulns[i], indent=4)
-            outputfile=os.path.join(vulnsdir,f"{i}.json")
-            with open(outputfile, "w") as f:
-                f.write(vulns_data)              
-        Paths=document["Paths"]
-        if Paths:
-            outputfilejson=outputfolder+"/dirsearch.json"
-            with open(outputfilejson, "w") as f:
-                json.dump(Paths, f, indent=4)
-            outputtxt=outputfolder+"/dirsearch.txt"
-            pathslist=Paths[0]
-            data=[]
-            for i in pathslist:
-                data.append(i.split(" ")[-1])
-            with open(outputtxt, "w") as f:
-                f.write("\n".join(data))
-        Paths403=document["Paths403"]
-        if Paths403:
-            outputtxt=outputfolder+"/paths403.txt"
-            paths403data=[]
-            for i in Paths403:
-                for j in i:
-                    paths403data.append(j["pathurl"])
-            with open(outputtxt, "w") as f:
-                f.write("\n".join(paths403data))              
+            domain=document["Domain"]
+            logging.info(f"{Fore.MAGENTA}Creating report for domain {domain}")
 
-        Screenshot=document["Screenshot"]
-        if Screenshot:
-            outputfile=os.path.join(outputfolder,"screenshot.png")
-            with open(outputfile, "wb") as f:
-                f.write(Screenshot)
-        Toolsdata=document["data"]
-        toolsnames=Toolsdata.keys()
-        for i in toolsnames:
-            tool_data = json.dumps(Toolsdata[i], indent=4)
-            outputfile=os.path.join(outputfolder,f"{i}.json")
-            with open(outputfile, "w") as f:
-                f.write(tool_data)              
-        collectionjs = db["js"]
-        query = {"domain": domain}
-        jsdata = list(collectionjs.find(query))  
-        if jsdata:
-            jsresult=[]
-            jslinks=[]
-            for i in jsdata:
-                if i["Vulns"] !=[]:
-                    
-                    jsresult.append({"url":i["url"],"Vulns":i["Vulns"]})
-                jslinks.append(i["url"])
-            jsvulns_data = json.dumps(jsresult, indent=4)
-            outputfile=os.path.join(vulnsdir,f"jsvulns.json")
-            with open(outputfile, "w") as f:
-                f.write(jsvulns_data)
-            outputfile=os.path.join(outputfolder,f"js_links.txt")
-            with open(outputfile, "w") as f:
-                f.write("\n".join(jslinks))              
+            outputfolder=os.path.join(output, domain)
+            if not os.path.exists(f"{outputfolder}"):
+                os.makedirs(f"{outputfolder}")
+
+            domain_files=[]
+            for i in files:
+                
+                if domain in i:
+                    domain_files.append(i)
+            for i in domain_files:
+                data=s3.get_object(Bucket="bhunters", Key=i)["Body"]
+                foldername=i.split("_")[0]
+                outputfoldertool=os.path.join(outputfolder,foldername)
+                if not os.path.exists(f"{outputfoldertool}"):
+                    os.makedirs(f"{outputfoldertool}")
+                outputfile=os.path.join(outputfoldertool,"_".join(i.split("_")[1:])+".txt")
+                with open(outputfile, "wb") as f:
+                    f.write(data.read())
+            Ports=document["Ports"]
+            if Ports:
+                ports_data = json.dumps(Ports, indent=4)
+                outputfile=os.path.join(outputfolder,"ports.json")
+                with open(outputfile, "w") as f:
+                    f.write(ports_data)
+            Technology=document["Technology"]
+            if Technology:
+                technology_data = json.dumps(Technology, indent=4)
+                outputfile=os.path.join(outputfolder,"technology.json")
+                with open(outputfile, "w") as f:
+                    f.write(technology_data)
+            Vulns=document["Vulns"]
+            vulnsdirs=Vulns.keys()
+            vulnsdir=os.path.join(outputfolder,"vulns")
+            if not os.path.exists(f"{vulnsdir}"):
+                os.makedirs(f"{vulnsdir}")
+            for i in vulnsdirs:
+                vulns_data = json.dumps(Vulns[i], indent=4)
+                outputfile=os.path.join(vulnsdir,f"{i}.json")
+                with open(outputfile, "w") as f:
+                    f.write(vulns_data)              
+            Paths=document["Paths"]
+            if Paths:
+                outputfilejson=outputfolder+"/dirsearch.json"
+                with open(outputfilejson, "w") as f:
+                    json.dump(Paths, f, indent=4)
+                outputtxt=outputfolder+"/dirsearch.txt"
+                pathslist=Paths[0]
+                data=[]
+                for i in pathslist:
+                    data.append(i.split(" ")[-1])
+                with open(outputtxt, "w") as f:
+                    f.write("\n".join(data))
+            Paths403=document["Paths403"]
+            if Paths403:
+                outputtxt=outputfolder+"/paths403.txt"
+                paths403data=[]
+                for i in Paths403:
+                    for j in i:
+                        paths403data.append(j["pathurl"])
+                with open(outputtxt, "w") as f:
+                    f.write("\n".join(paths403data))              
+
+            Screenshot=document["Screenshot"]
+            if Screenshot:
+                outputfile=os.path.join(outputfolder,"screenshot.png")
+                with open(outputfile, "wb") as f:
+                    f.write(Screenshot)
+            Toolsdata=document["data"]
+            toolsnames=Toolsdata.keys()
+            for i in toolsnames:
+                tool_data = json.dumps(Toolsdata[i], indent=4)
+                outputfile=os.path.join(outputfolder,f"{i}.json")
+                with open(outputfile, "w") as f:
+                    f.write(tool_data)              
+            collectionjs = db["js"]
+            query = {"domain": domain}
+            jsdata = list(collectionjs.find(query))  
+            if jsdata:
+                jsresult=[]
+                jslinks=[]
+                for i in jsdata:
+                    if i["Vulns"] !=[]:
+                        
+                        jsresult.append({"url":i["url"],"Vulns":i["Vulns"]})
+                    jslinks.append(i["url"])
+                jsvulns_data = json.dumps(jsresult, indent=4)
+                outputfile=os.path.join(vulnsdir,f"jsvulns.json")
+                with open(outputfile, "w") as f:
+                    f.write(jsvulns_data)
+                outputfile=os.path.join(outputfolder,f"js_links.txt")
+                with open(outputfile, "w") as f:
+                    f.write("\n".join(jslinks))     
+    with open(output+"subdomains.txt", "w") as f:
+        f.write("\n".join(subdomains))              
+             
 def status_report():
     logging.info("The following are the current modules available:")
     for toolname in tools:
