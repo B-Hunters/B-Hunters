@@ -7,7 +7,9 @@ import pymongo
 import re
 import os
 import json
-
+from karton.core.inspect import KartonAnalysis, KartonQueue, KartonState
+import time
+import datetime
 def monogocon(config):
     mongoconfig=config["mongo"]
     username =mongoconfig["user"]
@@ -53,7 +55,7 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
     logging.info(banner)
 
     # Add subcommands
-    subparsers = parser.add_subparsers(dest='command', required=True, help=f"{Fore.YELLOW}Specify either 'scan' or 'report'")
+    subparsers = parser.add_subparsers(dest='command', required=True, help=f"{Fore.YELLOW}Specify either 'scan', 'report' , or 'status'")
 
     parser.add_argument('--config', '-c', type=str, help=f"{Fore.YELLOW}Optional path to configuration file", default="/etc/b-hunters/b-hunters.ini")
 
@@ -68,13 +70,16 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
     report_parser.add_argument('--domain', '-d', type=str, required=True, help=f"{Fore.YELLOW}Specify the domain for the report")
     report_parser.add_argument('--output', '-o', type=str, help=f"{Fore.YELLOW}Optional path to save the report output")
 
+    # Status  command
+    status_parser = subparsers.add_parser('status', help=f"{Fore.CYAN}Get the status of the system")
+    status_parser.add_argument('-s','--stuck', action='store_true', help=f"{Fore.YELLOW}Optional argument to restart stuck tasks periodically")
     # Parse the arguments
     args = parser.parse_args()
     config = Config(path=args.config)
     global db, s3,producer
     db=monogocon(config)
 
-    producer=Producer(config=config)
+    producer=Producer(config=config,identity="B-hunters-ClI")
     s3=producer.backend.s3
     # Execute commands
     if args.command == 'scan':
@@ -82,6 +87,18 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
     
     elif args.command == 'report':
         generate_report(args.domain, args.output)
+    elif args.command == 'status':
+        global state, tools
+        state = KartonState(producer.backend)
+        tools = list(state.binds.keys())
+
+        status_report()
+        if args.stuck:
+            logging.info(f"{Fore.YELLOW}Periodically restarting stuck tasks...")
+            while True:
+                restart_stuck_tasks()
+                logging.info("Sleeping for 3 hours...")
+                time.sleep(60*3)
         
 def getfilesnames():
     files = []
@@ -289,7 +306,31 @@ def generate_report(domain, output=None):
             outputfile=os.path.join(outputfolder,f"js_links.txt")
             with open(outputfile, "w") as f:
                 f.write("\n".join(jslinks))              
+def status_report():
+    logging.info("The following are the current modules available:")
+    for toolname in tools:
+        online_count = state.queues[toolname].online_consumers_count
+        pending=len(state.queues[toolname].pending_tasks)
+        crached=len(state.queues[toolname].crashed_tasks)
+        if online_count == 0:
+            logging.info(f"\033[91mModule: {toolname}, Online Consumers: {online_count}, Pending Tasks: {pending}, Crashed Tasks: {crached}\033[0m")
+        else:
+            logging.info(f"\033[94mModule: {toolname}, Online Consumers: {online_count}, Pending Tasks: {pending}, Crashed Tasks: {crached}\033[0m")
+def restart_stuck_tasks():
+    logging.info("Checking for stuck tasks...")
+    for toolname in tools:
+        pending=state.queues[toolname].pending_tasks
+        count=len(pending)                 
+        for i in pending:
+            status=i.status                    
+            now = datetime.datetime.now()
 
+            minutes_ago = (now.timestamp() - i.last_update) / 60
+
+            if status =="TaskState.STARTED" and minutes_ago > 60:
+                logging.info(f"Restarting stuck task: {i}")
+                producer.backend.restart_task(i)
+                
 if __name__ == "__main__":
     main()
 
