@@ -327,15 +327,24 @@ def restart_stuck_tasks():
     logging.info("Checking for stuck tasks...")
     for toolname in tools:
         pending=state.queues[toolname].pending_tasks
-        count=len(pending)                 
+        count=len(pending) 
+        countofstarted=0
+        for i in pending:
+            status=i.status  
+            if "started" in  str(status).lower():
+                countofstarted+=1
+                
         for i in pending:
             status=i.status                    
             now = datetime.datetime.now()
 
             minutes_ago = (now.timestamp() - i.last_update) / 60
+            if countofstarted==0 and minutes_ago > 90:
+                logging.info(f"Restarting stuck task: {i.uid}")
+                producer.backend.restart_task(i)
 
-            if status =="TaskState.STARTED" and minutes_ago > 60:
-                logging.info(f"Restarting stuck task: {i}")
+            if "started" in  str(status).lower() and minutes_ago > 90:
+                logging.info(f"Restarting stuck task: {i.uid}")
                 producer.backend.restart_task(i)
                 
 if __name__ == "__main__":
