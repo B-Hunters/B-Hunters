@@ -11,6 +11,8 @@ import tldextract
 import re
 import base64
 import hashlib
+from bson import ObjectId
+
 class BHunters(Karton):
     def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
         config = Config(path="/etc/b-hunters/b-hunters.ini")
@@ -170,10 +172,13 @@ class BHunters(Karton):
             self.log.error("No document found for the specified domain.")
             
         else:
+            scanid=existing_document["Scanid"]
+            collection=self.db["scans"]
+            existing_document = collection.find_one({"_id": ObjectId(scanid)})
             existing_links = existing_document.get("ScanLinks", {}).get(self.identity, [])
             missing_links = [link for link in links if link not in existing_links]
             if missing_links:
-                collection.update_one({"Domain": subdomain}, {"$push": {f"ScanLinks.{self.identity}": {"$each": missing_links}}})
+                collection.update_one({"_id": ObjectId(scanid)}, {"$push": {f"ScanLinks.{self.identity}": {"$each": missing_links}}})
         return missing_links    
     def encode_filename(self, url_or_path):
         """
