@@ -101,22 +101,27 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
                 time.sleep(60*3)
 
 def get_files_names():
-    """
-    Retrieve all file names from the S3 'bhunters' bucket using pagination.
+    """Retrieve all file names from the S3 'bhunters' bucket using pagination.
 
     This function handles large buckets by implementing S3's pagination mechanism
     through continuation tokens. It iteratively fetches all objects from the bucket
     until no more objects are available.
 
-    Global Dependencies:
-        s3: boto3.client('s3') instance for S3 operations
+    :param None: This function doesn't take any parameters
 
-    Returns:
-        list: A list of strings containing all file keys in the bucket
+    :type s3: boto3.client('s3')
+    :param s3: boto3 S3 client instance for S3 operations
 
-    Raises:
-        botocore.exceptions.ClientError: If there are issues accessing the S3 bucket
-        botocore.exceptions.BotoCoreError: If there are AWS configuration issues
+    :raises botocore.exceptions.ClientError: If there are issues accessing the S3 bucket
+    :raises botocore.exceptions.BotoCoreError: If there are AWS configuration issues
+
+    :return: A list of strings containing all file keys in the bucket
+    :rtype: list
+
+    Note:
+        - This function assumes the existence of a global 's3' client object
+        - The function may take a while to complete for buckets with many objects
+        - Ensure proper AWS credentials and permissions are set up before calling
     """
     files = []
     bucket_name = "bhunters"
@@ -238,14 +243,32 @@ def generate_report(domain, output=None):
         }
 
     def save_document_data(document, outputfolder, domain=None, db=None):
-        """
-        Save document data according to predefined configuration.
+        """Save document data according to predefined configuration.
 
-        Args:
-            document (dict): The document containing various data types
-            outputfolder (str): Base output directory path
-            domain (str, optional): Domain name for JS data queries
-            db (pymongo.database.Database, optional): MongoDB database instance
+        Processes and saves different types of data from the document according to
+        the DATA_HANDLERS configuration. Handles various data types including tools data,
+        JavaScript data, and general document data.
+
+        :param document: The document containing various data types
+        :type document: dict
+        :param outputfolder: Base output directory path
+        :type outputfolder: str
+        :param domain: Domain name for JS data queries, defaults to None
+        :type domain: str, optional
+        :param db: MongoDB database instance for JS queries, defaults to None
+        :type db: pymongo.database.Database, optional
+
+        :raises OSError: If there are issues creating directories or writing files
+        :raises ValueError: If required data fields are missing or malformed
+        :raises TypeError: If input parameters are of incorrect type
+
+        :return: None
+        :rtype: None
+
+        Note:
+            - The function uses the global DATA_HANDLERS configuration dictionary
+            - Directory structure is created automatically if it doesn't exist
+            - Special handling is provided for tools data, JS data, and root-level files
         """
         for data_type, config in DATA_HANDLERS.items():
             # Handle tools data specially
@@ -471,27 +494,31 @@ def generate_report(domain, output=None):
             save_document_data(document, outputfolder, domain=domain, db=db)
 
 def status_report():
-    """
-    Display the status of all available modules in the system.
+    """Display status information for all available system modules.
 
-    This function prints a color-coded report showing the current state of each module,
-    including the number of online consumers, pending tasks, and crashed tasks.
-    Modules with no online consumers are highlighted in red, while active modules
-    are shown in blue.
+    This function generates a color-coded report of all modules in the system,
+    showing their current operational status including online consumers,
+    pending tasks, and crashed tasks. Modules are highlighted in different
+    colors based on their operational status.
 
-    Global Dependencies:
-        tools (list): List of available tool names
-        state (KartonState): The current state of the Karton system
+    :param None: This function doesn't take any parameters
 
-    Color Scheme:
-        - Red: Indicates modules with no online consumers
-        - Blue: Indicates active modules with online consumers
+    :type tools: list
+    :param tools: List of available tool names
+    :type state: KartonState
+    :param state: Current state of the Karton system
 
-    Returns:
-        None
+    :raises AttributeError: If required global dependencies are not available
+    :raises TypeError: If tools list contains non-string elements
+    :raises KartonStateError: If there are issues accessing Karton system state
+
+    :return: None
+    :rtype: None
 
     Note:
-        Uses colorama for cross-platform color formatting
+        - Uses colorama for cross-platform color formatting
+        - Red indicates modules with no online consumers
+        - Blue indicates active modules with online consumers
     """
     logging.info("The following are the current modules available:")
 
