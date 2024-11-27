@@ -10,6 +10,7 @@ import json
 from karton.core.inspect import KartonAnalysis, KartonQueue, KartonState
 import time
 import datetime
+
 def monogocon(config):
     mongoconfig=config["mongo"]
     username =mongoconfig["user"]
@@ -132,7 +133,7 @@ def run_scan(domain, scantype, description=None):
     domain = domain.rstrip('/')    
 
     if existing_document is None:
-        new_document = {"Domain": domain,"Type":scantype,"Description":description}
+        new_document = {"Domain": domain,"Type":scantype,"Description":description,"ScanLinks":{}}
         result = collection.insert_one(new_document)
         if result.acknowledged:
             scan_id=str(result.inserted_id)
@@ -157,9 +158,7 @@ def run_scan(domain, scantype, description=None):
 def generate_report(domain, output=None):
     domain = re.sub(r'^https?://', '', domain)
     domain = domain.rstrip('/')    
-    if output:
-        output=os.path(output)
-    else:
+    if  not output:
         output=os.path.join("/tmp", f"{domain}_report/")
     
     if not os.path.exists(output):
@@ -309,8 +308,9 @@ def generate_report(domain, output=None):
                     f.write(jsvulns_data)
                 outputfile=os.path.join(outputfolder,f"js_links.txt")
                 with open(outputfile, "w") as f:
-                    f.write("\n".join(jslinks))     
-    with open(output+"subdomains.txt", "w") as f:
+                    f.write("\n".join(jslinks)) 
+    outputfile=os.path.join(output,f"subdomains.txt")
+    with open(outputfile, "w") as f:
         f.write("\n".join(subdomains))              
              
 def status_report():
@@ -329,6 +329,7 @@ def restart_stuck_tasks():
         pending=state.queues[toolname].pending_tasks
         count=len(pending) 
         countofstarted=0
+        logging.info(f"Tool {toolname}")
         for i in pending:
             status=i.status  
             if "started" in  str(status).lower():
@@ -337,13 +338,14 @@ def restart_stuck_tasks():
         for i in pending:
             status=i.status                    
             now = datetime.datetime.now()
-
             minutes_ago = (now.timestamp() - i.last_update) / 60
-            if countofstarted==0 and minutes_ago > 90:
-                logging.info(f"Restarting stuck task: {i.uid}")
-                producer.backend.restart_task(i)
+            # if countofstarted==0 and minutes_ago > 90:
+            #     logging.info(i)
+            #     logging.info(f"Restarting stuck task: {i.uid}")
+            #     producer.backend.restart_task(i)
 
             if "started" in  str(status).lower() and minutes_ago > 90:
+                # logging.info(i)
                 logging.info(f"Restarting stuck task: {i.uid}")
                 producer.backend.restart_task(i)
                 
