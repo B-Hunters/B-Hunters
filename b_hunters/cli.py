@@ -99,7 +99,7 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
             while True:
                 restart_stuck_tasks()
                 logging.info("Sleeping for 3 hours...")
-                time.sleep(60*3)
+                time.sleep(60*3*60)
         
 def getfilesnames():
     files = []
@@ -325,29 +325,35 @@ def status_report():
             logging.info(f"\033[94mModule: {toolname}, Online Consumers: {online_count}, Pending Tasks: {pending}, Crashed Tasks: {crached}\033[0m")
 def restart_stuck_tasks():
     logging.info("Checking for stuck tasks...")
-    for toolname in tools:
-        pending=state.queues[toolname].pending_tasks
-        count=len(pending) 
-        countofstarted=0
-        logging.info(f"Tool {toolname}")
-        for i in pending:
-            status=i.status  
-            if "started" in  str(status).lower():
-                countofstarted+=1
-                
-        for i in pending:
-            status=i.status                    
-            now = datetime.datetime.now()
-            minutes_ago = (now.timestamp() - i.last_update) / 60
-            # if countofstarted==0 and minutes_ago > 90:
-            #     logging.info(i)
-            #     logging.info(f"Restarting stuck task: {i.uid}")
-            #     producer.backend.restart_task(i)
+    state = KartonState(producer.backend)
+    tools = list(state.binds.keys())
 
-            if "started" in  str(status).lower() and minutes_ago > 90:
-                # logging.info(i)
-                logging.info(f"Restarting stuck task: {i.uid}")
-                producer.backend.restart_task(i)
+    for toolname in tools:
+        if "subrecon" not in toolname:
+            
+            pending=state.queues[toolname].pending_tasks
+            count=len(pending) 
+            countofstarted=0
+            logging.info(f"Tool {toolname}")
+            for i in pending:
+                status=i.status  
+                if "started" in  str(status).lower():
+                    countofstarted+=1
+                    
+            for i in pending:
+                status=i.status                    
+                now = datetime.datetime.now()
+                minutes_ago = (now.timestamp() - i.last_update) / 60
+                if countofstarted==0 and minutes_ago > 150:
+                    logging.info(f"Restarting stuck task: {i.uid}")
+                    logging.info("no stack is started")
+
+                    producer.backend.restart_task(i)
+
+                if "started" in  str(status).lower() and minutes_ago > 150:
+                    logging.info(f"Restarting stuck task: {i.uid}")
+                    logging.info("task is stuck")
+                    producer.backend.restart_task(i)
                 
 if __name__ == "__main__":
     main()

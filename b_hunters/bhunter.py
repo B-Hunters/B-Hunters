@@ -145,7 +145,7 @@ class BHunters(Karton):
     def checkjs(self,url):
         try:
             response = requests.get(url,timeout=10)
-            if response.status_code == 200 and response.headers["Content-Type"].startswith("application/javascript"):
+            if response.headers["Content-Type"].startswith("application/javascript"):
                 return True
             else:
                 return False
