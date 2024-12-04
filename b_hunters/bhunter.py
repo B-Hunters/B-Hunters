@@ -141,8 +141,15 @@ class BHunters(Karton):
         headers = {
             "Content-Type": "application/json"
         }
-        response = requests.post(webhook_url, data=json.dumps(data), headers=headers)
-        
+        trials=5
+        while trials>0:
+            try:
+                response = requests.post(webhook_url, data=json.dumps(data), headers=headers)
+                break
+            except Exception as e:
+                trials-=1
+                if trials>0:
+                    time.sleep(10)
     def checkjs(self,url):
         try:
             response = requests.get(url,timeout=10)
