@@ -12,7 +12,7 @@ import re
 import base64
 import hashlib
 from bson import ObjectId
-
+import time
 class BHunters(Karton):
     def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
         config = Config(path="/etc/b-hunters/b-hunters.ini")
@@ -171,11 +171,20 @@ class BHunters(Karton):
         db = client[db]
         return db    
     def checklinksexist(self,subdomain,links):
-        collection=self.db["domains"]
         missing_links=[]
         if isinstance(links,str):
             links=links.splitlines()
-        existing_document = collection.find_one({"Domain": subdomain})
+        try:
+            
+            collection=self.db["domains"]
+            existing_document = collection.find_one({"Domain": subdomain})
+        except Exception as e:
+            self.log.error(f"Error Happened with mongo: {e}")
+            time.sleep(5)
+            self.db=self.monogocon()
+            collection=self.db["domains"]
+            existing_document = collection.find_one({"Domain": subdomain})
+
         if existing_document is None:
             self.log.error("No document found for the specified domain.")
             
