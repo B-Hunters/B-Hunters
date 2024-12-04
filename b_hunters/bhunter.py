@@ -172,6 +172,8 @@ class BHunters(Karton):
         return db    
     def checklinksexist(self,subdomain,links):
         missing_links=[]
+        if links =="":
+            return []
         if isinstance(links,str):
             links=links.splitlines()
         try:
