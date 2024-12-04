@@ -20,6 +20,7 @@ class BHunters(Karton):
         self.db=self.monogocon()
     
     def update_task_status(self,url,status):
+        self.waitformongo()
         collection=self.db["domains"]
         if status == "Started":
             collection.update_one(
@@ -163,6 +164,7 @@ class BHunters(Karton):
         # Connection string with authentication
         connection_string = f"mongodb://{username}:{password}@{host}:{port}/"
         client = pymongo.MongoClient(connection_string)
+        self.client=client
         try:
             client.admin.command('ping')
         except pymongo.errors.ConnectionFailure:
@@ -170,22 +172,38 @@ class BHunters(Karton):
 
         db = client[db]
         return db    
+    def is_mongo_alive(self):
+        try:
+            # Ping the server to check connectivity
+            self.client.admin.command('ping')
+            return True
+        except Exception as e:
+            return False
+    def waitformongo(self):
+        tries = 0
+        max_tries = 10
+        retry_interval = 5  # seconds
+        while tries < max_tries:
+            if self.is_mongo_alive():
+                return
+
+            tries += 1
+            self.log.warning(f"MongoDB is not available. Retrying in {retry_interval} seconds... (try {tries}/{max_tries})")
+            time.sleep(retry_interval)
+            # Reconnect only if necessary
+            self.db=self.monogocon()
+        raise Exception("MongoDB is not available after 10 tries.")
+
     def checklinksexist(self,subdomain,links):
         missing_links=[]
         if links =="":
             return []
         if isinstance(links,str):
             links=links.splitlines()
-        try:
-            
-            collection=self.db["domains"]
-            existing_document = collection.find_one({"Domain": subdomain})
-        except Exception as e:
-            self.log.error(f"Error Happened with mongo: {e}")
-            time.sleep(5)
-            self.db=self.monogocon()
-            collection=self.db["domains"]
-            existing_document = collection.find_one({"Domain": subdomain})
+
+        self.waitformongo()            
+        collection=self.db["domains"]
+        existing_document = collection.find_one({"Domain": subdomain})
 
         if existing_document is None:
             self.log.error("No document found for the specified domain.")
