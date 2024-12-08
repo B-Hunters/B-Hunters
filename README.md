@@ -1,14 +1,14 @@
 # B-Hunters
 ```text
-$$$$$$$\          $$\   $$\                      $$\                                   
-$$  __$$\         $$ |  $$ |                     $$ |                                  
-$$ |  $$ |        $$ |  $$ |$$\   $$\ $$$$$$$\ $$$$$$\    $$$$$$\   $$$$$$\   $$$$$$$\ 
+$$$$$$$\          $$\   $$\                      $$\
+$$  __$$\         $$ |  $$ |                     $$ |
+$$ |  $$ |        $$ |  $$ |$$\   $$\ $$$$$$$\ $$$$$$\    $$$$$$\   $$$$$$\   $$$$$$$\
 $$$$$$$\ |$$$$$$\ $$$$$$$$ |$$ |  $$ |$$  __$$\\_$$  _|  $$  __$$\ $$  __$$\ $$  _____|
-$$  __$$\ \______|$$  __$$ |$$ |  $$ |$$ |  $$ | $$ |    $$$$$$$$ |$$ |  \__|\$$$$$$\  
-$$ |  $$ |        $$ |  $$ |$$ |  $$ |$$ |  $$ | $$ |$$\ $$   ____|$$ |       \____$$\ 
+$$  __$$\ \______|$$  __$$ |$$ |  $$ |$$ |  $$ | $$ |    $$$$$$$$ |$$ |  \__|\$$$$$$\
+$$ |  $$ |        $$ |  $$ |$$ |  $$ |$$ |  $$ | $$ |$$\ $$   ____|$$ |       \____$$\
 $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$$$$$  |
-\_______/         \__|  \__| \______/ \__|  \__|  \____/  \_______|\__|      \_______/ 
-                                            0xBormaa - 2024                                            
+\_______/         \__|  \__| \______/ \__|  \__|  \____/  \_______|\__|      \_______/
+                                            0xBormaa - 2024
 ```
 
 **B-Hunters** is a bug bounty framework built on the [Karton](https://github.com/CERT-Polska/karton) framework. It leverages Docker to execute multiple tools and tasks across different machines, providing a powerful, modular, and scalable approach to reconnaissance and vulnerability scanning.
@@ -26,78 +26,78 @@ Results can be integrated with discord webhooks to be sent once tool running fin
 B-Hunters currently includes the following tools:
 ## Subdomains
 
-1. **[Subfinder](https://github.com/projectdiscovery/subfinder)**  
+1. **[Subfinder](https://github.com/projectdiscovery/subfinder)**
    A fast passive subdomain enumeration tool that uses a wide range of sources.
 
-2. **[Vita](https://github.com/vita-project/vita)**  
+2. **[Vita](https://github.com/vita-project/vita)**
    A tool for vulnerability and information gathering during reconnaissance.
 
-3. **[Findomain](https://github.com/findomain/findomain)**  
+3. **[Findomain](https://github.com/findomain/findomain)**
    A subdomain enumeration tool that integrates API keys for faster and more extensive discovery.
 
-4. **[Sublist3r](https://github.com/aboul3la/Sublist3r)**  
+4. **[Sublist3r](https://github.com/aboul3la/Sublist3r)**
    A tool designed to enumerate subdomains using multiple search engines.
 
-5. **[Assetfinder](https://github.com/tomnomnom/assetfinder)**  
+5. **[Assetfinder](https://github.com/tomnomnom/assetfinder)**
    Quickly finds domains and subdomains related to a target using various sources.
 
-6. **[Chaos](https://github.com/projectdiscovery/chaos-client)**  
+6. **[Chaos](https://github.com/projectdiscovery/chaos-client)**
    Fetches subdomains from ProjectDiscovery's Chaos dataset.
 
 ---
 
 ### Crawling and Spidering
 
-1. **[Gospider](https://github.com/jaeles-project/gospider)**  
+1. **[Gospider](https://github.com/jaeles-project/gospider)**
    A fast web spider written in Go, designed for gathering URLs and data.
 
-2. **[Dirsearch](https://github.com/maurosoria/dirsearch)**  
+2. **[Dirsearch](https://github.com/maurosoria/dirsearch)**
    A simple command-line tool designed to brute force directories and files in webservers.
 
-3. **[GetJS](https://github.com/003random/getJS)**  
+3. **[GetJS](https://github.com/003random/getJS)**
    Scrapes JavaScript files from web pages for further analysis.
 
-4. **[Gowitness](https://github.com/sensepost/gowitness)**  
+4. **[Gowitness](https://github.com/sensepost/gowitness)**
    A tool for taking screenshots of websites, collecting headers, and identifying technologies.
 
-5. **[Katana](https://github.com/projectdiscovery/katana)**  
+5. **[Katana](https://github.com/projectdiscovery/katana)**
    A fast and lightweight web crawler built for information gathering.
 
-6. **[ParamSpider](https://github.com/devanshbatham/ParamSpider)**  
+6. **[ParamSpider](https://github.com/devanshbatham/ParamSpider)**
    Finds parameters from web pages for use in parameter-based vulnerability testing.
 
-7. **[Waymore](https://github.com/xnl-h4ck3r/waymore)**  
+7. **[Waymore](https://github.com/xnl-h4ck3r/waymore)**
    Fetches URLs from various online services, including Wayback Machine and others.
 
-8. **[Waybackurls](https://github.com/tomnomnom/waybackurls)**  
+8. **[Waybackurls](https://github.com/tomnomnom/waybackurls)**
    Retrieves URLs for a domain from the Wayback Machine and similar services.
 
-9. **[GAU (GetAllURLs)](https://github.com/lc/gau)**  
+9. **[GAU (GetAllURLs)](https://github.com/lc/gau)**
    Fetches known URLs from AlienVault's Open Threat Exchange, Wayback Machine, and more.
 
-10. **[Wappalyzer-CLI](https://github.com/gokulapap/wappalyzer-cli.git)**  
+10. **[Wappalyzer-CLI](https://github.com/gokulapap/wappalyzer-cli.git)**
    Identifies technologies used on websites via the command line.
 
 ---
 
 ### Vulnerability Checks
 
-1. **[DalFox](https://github.com/hahwul/dalfox)**  
+1. **[DalFox](https://github.com/hahwul/dalfox)**
    A fast and powerful open-source tool for detecting and exploiting XSS vulnerabilities.
 
-2. **[SSTImap](https://github.com/vladko312/SSTImap)**  
+2. **[SSTImap](https://github.com/vladko312/SSTImap)**
    Detects and maps Server-Side Template Injection (SSTI) vulnerabilities.
 
-3. **[SQLMap](https://github.com/sqlmapproject/sqlmap)**  
+3. **[SQLMap](https://github.com/sqlmapproject/sqlmap)**
    An automated SQL injection and database takeover tool.
 
-4. **[Nuclei](https://github.com/projectdiscovery/nuclei)**  
+4. **[Nuclei](https://github.com/projectdiscovery/nuclei)**
    A fast tool for vulnerability scanning based on templates.
 
-5. **[SecretFinder](https://github.com/m4ll0k/SecretFinder)**  
+5. **[SecretFinder](https://github.com/m4ll0k/SecretFinder)**
    Finds sensitive data in JavaScript files.
 
-6. **NipeJS**   
+6. **[NipeJS](https://github.com/i5nipe/nipejs)**
    A JavaScript analysis tool for identifying vulnerabilities.
 
 ---
@@ -135,7 +135,7 @@ B-Hunters uses a microservices architecture to provide these features:
 
 1. **Clone the Repository**:
    ```bash
-   git clone https://github.com/your-repo/B-Hunters.git
+   git clone https://github.com/B-Hunters/B-Hunters.git
    cd B-Hunters
    pip install .
    ```
@@ -146,7 +146,7 @@ B-Hunters uses a microservices architecture to provide these features:
 
 ## Config
 
-You have first to update **b-hunters.example.ini** file with your **IP** and other configs if you want to edit. 
+You have first to update **b-hunters.example.ini** file with your **IP** and other configs if you want to edit.
 **Remember when you update settings when running tools use the same config file**
 Config file by default should be in **/etc/b-hunters/b-hunters.ini"** if you want insomething else use **-c** flag when calling command
 
@@ -199,7 +199,7 @@ Generate a scan report for a specified domain.
 |
 #### **Usage**
 ```bash
-b-hunters report --domain <target_domain> [--output <output_path>] 
+b-hunters report --domain <target_domain> [--output <output_path>]
 ```
 
 Example to get report of domain example.com
@@ -210,13 +210,13 @@ b-hunters report -d example.com -o /tmp/example.com
 
 Here are the planned features and improvements for the tool:
 
--  **Create Web Interface**  
+-  **Create Web Interface**
   Develop a user-friendly web interface to manage scans and reports.
 
--  **Integrate Discord Bot**  
+-  **Integrate Discord Bot**
   Integrate a Discord bot to scan or get full report.
 
-- **Add More Tools**  
+- **Add More Tools**
   Continuously expand the toolset by adding more scanning and vulnerability scanning tools.
 
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/bormaa)
