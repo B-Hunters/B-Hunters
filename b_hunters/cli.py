@@ -10,6 +10,7 @@ import json
 from karton.core.inspect import KartonAnalysis, KartonQueue, KartonState
 import time
 import datetime
+
 def monogocon(config):
     mongoconfig=config["mongo"]
     username =mongoconfig["user"]
@@ -98,7 +99,7 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
             while True:
                 restart_stuck_tasks()
                 logging.info("Sleeping for 3 hours...")
-                time.sleep(60*3)
+                time.sleep(60*3*60)
         
 def getfilesnames():
     files = []
@@ -132,7 +133,7 @@ def run_scan(domain, scantype, description=None):
     domain = domain.rstrip('/')    
 
     if existing_document is None:
-        new_document = {"Domain": domain,"Type":scantype,"Description":description}
+        new_document = {"Domain": domain,"Type":scantype,"Description":description,"ScanLinks":{}}
         result = collection.insert_one(new_document)
         if result.acknowledged:
             scan_id=str(result.inserted_id)
@@ -157,9 +158,7 @@ def run_scan(domain, scantype, description=None):
 def generate_report(domain, output=None):
     domain = re.sub(r'^https?://', '', domain)
     domain = domain.rstrip('/')    
-    if output:
-        output=os.path(output)
-    else:
+    if  not output:
         output=os.path.join("/tmp", f"{domain}_report/")
     
     if not os.path.exists(output):
@@ -309,8 +308,9 @@ def generate_report(domain, output=None):
                     f.write(jsvulns_data)
                 outputfile=os.path.join(outputfolder,f"js_links.txt")
                 with open(outputfile, "w") as f:
-                    f.write("\n".join(jslinks))     
-    with open(output+"subdomains.txt", "w") as f:
+                    f.write("\n".join(jslinks)) 
+    outputfile=os.path.join(output,f"subdomains.txt")
+    with open(outputfile, "w") as f:
         f.write("\n".join(subdomains))              
              
 def status_report():
@@ -325,27 +325,35 @@ def status_report():
             logging.info(f"\033[94mModule: {toolname}, Online Consumers: {online_count}, Pending Tasks: {pending}, Crashed Tasks: {crached}\033[0m")
 def restart_stuck_tasks():
     logging.info("Checking for stuck tasks...")
+    state = KartonState(producer.backend)
+    tools = list(state.binds.keys())
+
     for toolname in tools:
-        pending=state.queues[toolname].pending_tasks
-        count=len(pending) 
-        countofstarted=0
-        for i in pending:
-            status=i.status  
-            if "started" in  str(status).lower():
-                countofstarted+=1
-                
-        for i in pending:
-            status=i.status                    
-            now = datetime.datetime.now()
+        if "subrecon" not in toolname:
+            
+            pending=state.queues[toolname].pending_tasks
+            count=len(pending) 
+            countofstarted=0
+            logging.info(f"Tool {toolname}")
+            for i in pending:
+                status=i.status  
+                if "started" in  str(status).lower():
+                    countofstarted+=1
+                    
+            for i in pending:
+                status=i.status                    
+                now = datetime.datetime.now()
+                minutes_ago = (now.timestamp() - i.last_update) / 60
+                if countofstarted==0 and minutes_ago > 150:
+                    logging.info(f"Restarting stuck task: {i.uid}")
+                    logging.info("no stack is started")
 
-            minutes_ago = (now.timestamp() - i.last_update) / 60
-            if countofstarted==0 and minutes_ago > 90:
-                logging.info(f"Restarting stuck task: {i.uid}")
-                producer.backend.restart_task(i)
+                    producer.backend.restart_task(i)
 
-            if "started" in  str(status).lower() and minutes_ago > 90:
-                logging.info(f"Restarting stuck task: {i.uid}")
-                producer.backend.restart_task(i)
+                if "started" in  str(status).lower() and minutes_ago > 150:
+                    logging.info(f"Restarting stuck task: {i.uid}")
+                    logging.info("task is stuck")
+                    producer.backend.restart_task(i)
                 
 if __name__ == "__main__":
     main()
