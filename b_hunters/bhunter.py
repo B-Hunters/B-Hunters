@@ -12,7 +12,7 @@ import re
 import base64
 import hashlib
 from bson import ObjectId
-
+import time
 class BHunters(Karton):
     def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
         config = Config(path="/etc/b-hunters/b-hunters.ini")
@@ -20,6 +20,7 @@ class BHunters(Karton):
         self.db=self.monogocon()
     
     def update_task_status(self,url,status):
+        self.waitformongo()
         collection=self.db["domains"]
         if status == "Started":
             collection.update_one(
@@ -140,9 +141,24 @@ class BHunters(Karton):
         headers = {
             "Content-Type": "application/json"
         }
-        response = requests.post(webhook_url, data=json.dumps(data), headers=headers)
-        
-
+        trials=5
+        while trials>0:
+            try:
+                response = requests.post(webhook_url, data=json.dumps(data), headers=headers)
+                break
+            except Exception as e:
+                trials-=1
+                if trials>0:
+                    time.sleep(10)
+    def checkjs(self,url):
+        try:
+            response = requests.get(url,timeout=10)
+            if response.headers["Content-Type"].startswith("application/javascript"):
+                return True
+            else:
+                return False
+        except requests.exceptions.RequestException:
+            return False
 
     def monogocon(self):
         mongoconfig=self.config["mongo"]
@@ -155,6 +171,7 @@ class BHunters(Karton):
         # Connection string with authentication
         connection_string = f"mongodb://{username}:{password}@{host}:{port}/"
         client = pymongo.MongoClient(connection_string)
+        self.client=client
         try:
             client.admin.command('ping')
         except pymongo.errors.ConnectionFailure:
@@ -162,12 +179,39 @@ class BHunters(Karton):
 
         db = client[db]
         return db    
+    def is_mongo_alive(self):
+        try:
+            # Ping the server to check connectivity
+            self.client.admin.command('ping')
+            return True
+        except Exception as e:
+            return False
+    def waitformongo(self):
+        tries = 0
+        max_tries = 10
+        retry_interval = 5  # seconds
+        while tries < max_tries:
+            if self.is_mongo_alive():
+                return
+
+            tries += 1
+            self.log.warning(f"MongoDB is not available. Retrying in {retry_interval} seconds... (try {tries}/{max_tries})")
+            time.sleep(retry_interval)
+            # Reconnect only if necessary
+            self.db=self.monogocon()
+        raise Exception("MongoDB is not available after 10 tries.")
+
     def checklinksexist(self,subdomain,links):
-        collection=self.db["domains"]
         missing_links=[]
+        if links =="":
+            return []
         if isinstance(links,str):
             links=links.splitlines()
+
+        self.waitformongo()            
+        collection=self.db["domains"]
         existing_document = collection.find_one({"Domain": subdomain})
+
         if existing_document is None:
             self.log.error("No document found for the specified domain.")
             
