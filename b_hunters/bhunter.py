@@ -153,11 +153,11 @@ class BHunters(Karton):
     def checkjs(self,url):
         try:
             response = requests.get(url,timeout=10)
-            if response.headers["Content-Type"].startswith("application/javascript"):
+            if "Content-Type" in response.headers and response.headers["Content-Type"].startswith("application/javascript"):
                 return True
             else:
                 return False
-        except requests.exceptions.RequestException:
+        except Exception as e:
             return False
 
     def monogocon(self):
