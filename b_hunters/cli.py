@@ -143,7 +143,7 @@ def run_scan(domain, scantype, description=None):
             task.add_payload("domain", domain,persistent=True)
             task.add_payload("scantype", scantype,persistent=True)
             task.add_payload("data", domain)
-            task.add_payload("scan_id", scan_id)
+            task.add_payload("scan_id", scan_id,persistent=True)
             task.add_payload("source", "producer")
             producer.send_task(task)
             logging.info(f"{Fore.GREEN}Starting Scanning {domain} with type {scantype}. Description: {description}")
