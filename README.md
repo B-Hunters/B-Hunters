@@ -1,6 +1,4 @@
-
-
-![bhunters_logo@0.5x](images\logo\bhunters_logo@0.5x.png)
+![bhunters_logo@0.5x](images/logo/bhunters_logo@0.5x.png)
 
 # B-Hunters
 
