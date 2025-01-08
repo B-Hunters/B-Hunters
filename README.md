@@ -1,4 +1,6 @@
-![bhunters_logo@0.5x](images/logo/bhunters_logo@0.5x.png)
+<p align="center">
+  <img src="images/logo/bhunters_logo@0.5x.png" alt="B-Hunters Logo">
+</p>
 
 # B-Hunters
 
