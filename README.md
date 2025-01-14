@@ -1,4 +1,9 @@
+<p align="center">
+  <img src="images/logo/bhunters_logo@0.5x.png" alt="B-Hunters Logo">
+</p>
+
 # B-Hunters
+
 ```text
 $$$$$$$\          $$\   $$\                      $$\
 $$  __$$\         $$ |  $$ |                     $$ |
@@ -76,7 +81,7 @@ B-Hunters currently includes the following tools:
    Fetches known URLs from AlienVault's Open Threat Exchange, Wayback Machine, and more.
 
 10. **[Wappalyzer-CLI](https://github.com/gokulapap/wappalyzer-cli.git)**
-   Identifies technologies used on websites via the command line.
+      Identifies technologies used on websites via the command line.
 
 ---
 
