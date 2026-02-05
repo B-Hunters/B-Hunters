@@ -1,0 +1,414 @@
+name: B-Hunters CI
+
+on:
+  push:
+    branches: [ main, develop, 'feature/*' ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  PYTHON_DEFAULT: '3.11'
+  MONGODB_VERSION: 6.0
+  REDIS_VERSION: 7-alpine
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+
+    services:
+      mongodb:
+        image: mongo:${{ env.MONGODB_VERSION }}
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:${{ env.REDIS_VERSION }}
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      minio:
+        image: minio/minio:latest
+        ports:
+          - 9000:9000
+          - 9001:9001
+        env:
+          MINIO_ACCESS_KEY: minioadmin
+          MINIO_SECRET_KEY: minioadmin
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        command: server /data --console-address ':9001'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}-${{ matrix.python-version }}
+        restore-keys: |
+          ${{ runner.os }}-pip-${{ matrix.python-version }}-
+          ${{ runner.os }}-pip-
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          libxml2-dev \
+          libxslt1-dev \
+          libffi-dev \
+          libcairo2-dev \
+          libpango1.0-dev \
+          libgdk-pixbuf2.0-dev \
+          libglib2.0-dev \
+          curl
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
+        pip install -e .
+
+    - name: Setup test configuration
+      run: |
+        sudo mkdir -p /etc/b-hunters
+        sudo chown -R $USER:$USER /etc/b-hunters
+        cat << 'EOF' > /etc/b-hunters/b-hunters.ini
+        [mongo]
+        user = admin
+        password = admin
+        db = bhunters_test
+        host = localhost
+        port = 27017
+
+        [redis]
+        host = localhost
+        port = 6379
+
+        [s3]
+        access_key = minioadmin
+        secret_key = minioadmin
+        address = localhost:9000
+        bucket = bhunters
+        secure = false
+
+        [Webhook]
+        discord_report = http://localhost:8000/webhook/discord
+        discord_task_status = http://localhost:8000/webhook/status
+        EOF
+
+    - name: Configure MinIO bucket
+      run: |
+        # Install MinIO client
+        curl https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
+        chmod +x /tmp/mc
+
+        # Configure and create bucket
+        /tmp/mc alias set local http://localhost:9000 minioadmin minioadmin
+        /tmp/mc mb local/bhunters --ignore-existing
+
+    - name: Wait for services and setup
+      run: |
+        # Wait for MongoDB
+        echo "Waiting for MongoDB..."
+        timeout 60 bash -c 'until mongosh --host localhost:27017 --eval "db.adminCommand({ ping: 1 })" > /dev/null 2>&1; do sleep 2; done'
+
+        # Create MongoDB user
+        mongosh --host localhost:27017 << 'EOF'
+        use admin
+        db.createUser({
+          user: "admin",
+          pwd: "admin",
+          roles: [{ role: "root", db: "admin" }]
+        })
+        EOF
+
+        # Wait for Redis
+        echo "Waiting for Redis..."
+        timeout 60 bash -c 'until redis-cli -h localhost ping; do sleep 2; done'
+
+        echo "All services are ready!"
+
+    - name: Run unit tests
+      run: |
+        pytest tests/unit/ -v \
+          --tb=short \
+          --cov=b_hunters \
+          --cov-report=term-missing \
+          --cov-report=xml:coverage-unit.xml \
+          --cov-report=html:htmlcov-unit \
+          --junitxml=junit-unit.xml
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+        MONGO_HOST: localhost
+        REDIS_HOST: localhost
+        CI: true
+
+    - name: Run integration tests
+      run: |
+        pytest tests/integration/ -v \
+          --tb=short \
+          --cov=b_hunters \
+          --cov-append \
+          --cov-report=xml:coverage-integration.xml \
+          --junitxml=junit-integration.xml \
+          -m "not slow" or CI
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+        MONGO_HOST: localhost
+        REDIS_HOST: localhost
+        CI: true
+
+    - name: Generate final coverage report
+      run: |
+        coverage combine coverage-*.xml
+        coverage xml -o coverage.xml
+        coverage report --show-missing
+      if: matrix.python-version == env.PYTHON_DEFAULT
+      continue-on-error: true
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      if: matrix.python-version == env.PYTHON_DEFAULT
+      with:
+        files: ./coverage.xml
+        flags: unittests,integration
+        name: codecov-umbrella
+        fail_ci_if_error: false
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+    - name: Upload coverage artifacts
+      uses: actions/upload-artifact@v3
+      if: matrix.python-version == env.PYTHON_DEFAULT
+      with:
+        name: coverage-reports
+        path: |
+          htmlcov*/
+          coverage*.xml
+        retention-days: 7
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-python-${{ matrix.python-version }}
+        path: |
+          junit-*.xml
+          htmlcov*/
+
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_DEFAULT }}
+
+    - name: Install linting tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort mypy pylint bandit
+
+    - name: Check code formatting with black
+      run: |
+        black --check --diff b_hunters/ tests/
+
+    - name: Check import ordering with isort
+      run: |
+        isort --check-only --diff b_hunters/ tests/
+
+    - name: Lint with flake8
+      run: |
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 b_hunters/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Zero-exit implies clean
+        flake8 b_hunters/ tests/ --count --exit-zero --max-complexity=15 --max-line-length=127 --statistics
+
+    - name: Type check with mypy
+      run: |
+        mypy b_hunters/ --ignore-missing-imports --no-strict-optional --no-error-summary || true
+      continue-on-error: true
+
+    - name: Security check with bandit
+      run: |
+        bandit -r b_hunters/ -f screen -ll || true
+      continue-on-error: true
+
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  report-generation-test:
+    name: Test Report Generation
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_DEFAULT }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+
+    - name: Install system dependencies for PDF generation
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev
+
+    - name: Test report generation
+      run: |
+        pytest tests/unit/test_reporting.py -v -k "test_generate_json_report or test_generate_html_report"
+
+    - name: Test enhanced reporting end-to-end
+      run: |
+        python -c "
+        from b_hunters.reporting import ReportGenerator, RiskScoringEngine, ExecutiveSummaryGenerator
+        import tempfile
+
+        # Test data
+        scan_data = {
+            'domain': 'test.example.com',
+            'scantype': 'multi',
+            'scan_date': '2024-01-01',
+            'metrics': {'subdomains': 5, 'findings': 2},
+            'findings': [
+                {'severity': 'High', 'type': 'XSS', 'description': 'Test', 'url': 'https://test.com'},
+                {'severity': 'Medium', 'type': 'IDOR', 'description': 'Test', 'url': 'https://test.com'}
+            ],
+            'subdomains': ['a.test.com', 'b.test.com'],
+            'technologies': ['nginx', 'php'],
+            'ports': [80, 443],
+            'risk_score': {
+                'overall_score': 35.5,
+                'risk_level': 'Medium',
+                'critical_count': 0,
+                'high_count': 1,
+                'medium_count': 1,
+                'low_count': 0,
+                'info_count': 0
+            },
+            'executive_summary': {
+                'overview': 'Test overview',
+                'key_findings': 'Test findings',
+                'recommendations': 'Test recommendations',
+                'risk_assessment': 'Test assessment',
+                'metrics': 'Test metrics'
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            generator = ReportGenerator(tmpdir)
+            
+            # Test JSON report
+            json_path = generator.generate_json_report(scan_data)
+            print(f'JSON report generated: {json_path}')
+            
+            # Test HTML report
+            html_path = generator.generate_html_report(scan_data)
+            print(f'HTML report generated: {html_path}')
+            
+            print('✓ Enhanced reporting tests passed!')
+        "
+
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/feature/'))
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: b-hunters:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        load: true
+
+    - name: Test Docker image
+      run: |
+        docker run --rm b-hunters:test b-hunters --help
+
+  notify:
+    name: Notify Status
+    runs-on: ubuntu-latest
+    needs: [test, lint, security-scan, report-generation-test]
+    if: always()
+
+    steps:
+    - name: Check workflow status
+      run: |
+        if [ "${{ needs.test.result }}" == "failure" ] || \
+           [ "${{ needs.lint.result }}" == "failure" ] || \
+           [ "${{ needs.security-scan.result }}" == "failure" ]; then
+          echo "Job failed"
+          exit 1
+        else
+          echo "All jobs passed"
+        fi

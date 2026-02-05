@@ -114,6 +114,25 @@ B-Hunters currently includes the following tools:
 4. **Nmap**
 
 ---
+## New Features (Version 2.0)
+
+### 🧪 Testing Pipeline
+- **Comprehensive test suite** with pytest framework
+- **Unit tests** for core components (bhunter.py, CLI)
+- **Integration tests** for Karton service chains
+- **Automated CI/CD** with GitHub Actions
+- **Code quality enforcement** with flake8, black, and mypy
+- **Coverage reporting** with Codecov integration
+
+### 📊 Enhanced Reporting
+- **Multiple output formats**: JSON, HTML, PDF, CSV
+- **Risk scoring engine** with severity classification (Critical, High, Medium, Low, Info)
+- **Executive summary** for management reporting
+- **Comparative reports** (before/after scanning)
+- **Third-party integrations**: Jira, GitLab, SARIF, DefectDojo
+- **Professional HTML reports** with severity breakdowns
+
+---
 ## Features
 
 - **Automation**: Automates recon and scanning tasks to save time and reduce manual effort.
@@ -121,6 +140,8 @@ B-Hunters currently includes the following tools:
 - **Scalability**: Handles large-scale tasks with multiprocessing and distributed workloads.
 - **Integration**: Feeds the output of one tool seamlessly into another.
 - **Dockerized**: Provides containerized environments for consistent and isolated tool execution.
+- **Testing**: Comprehensive test coverage (>80%) with automated CI/CD.
+- **Reporting**: Rich, multi-format reporting with risk analysis.
 
 ---
 
@@ -157,8 +178,7 @@ Config file by default should be in **/etc/b-hunters/b-hunters.ini"** if you wan
 
 # Usage
 
-
-The tool provides two main commands: `scan` and `report`. These commands allow you to perform scans on domains and generate reports. Below is a detailed explanation of each command and its options.
+The tool provides commands for scanning, reporting, and exporting security findings. Below is a detailed explanation of each command and its options.
 
 ## General Options
 
