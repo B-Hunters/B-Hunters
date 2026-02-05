@@ -198,34 +198,43 @@ class RiskScorer:
     def calculate_risk_score(self, finding: Dict[str, Any]) -> float:
         """
         Calculate a numeric risk score (0-10) for a single finding.
-        
+
         Args:
             finding: Dictionary containing vulnerability information
-            
+
         Returns:
             Risk score between 0 and 10
         """
         severity = self.classify_severity(finding)
         base_score = self.severity_weights[severity]
-        
-        # Confidence adjustment
+
+        # Confidence adjustment - ensure critical findings even with low confidence still high
         confidence = finding.get("confidence", "medium").lower()
-        confidence_multiplier = {
-            "high": 1.0,
-            "medium": 0.8,
-            "low": 0.5
-        }.get(confidence, 0.8)
-        
+        if severity == Severity.CRITICAL:
+            # For critical, use higher base to ensure ≥10.0 for high confidence
+            base_score = 10.0
+            confidence_multiplier = {
+                "high": 1.0,
+                "medium": 0.9,
+                "low": 0.7
+            }.get(confidence, 0.8)
+        else:
+            confidence_multiplier = {
+                "high": 1.0,
+                "medium": 0.8,
+                "low": 0.5
+            }.get(confidence, 0.8)
+
         # Evidence-based adjustments
         evidence_bonus = 0
         evidence = finding.get("evidence", "").lower()
-        
+
         if "exploit" in evidence or "poc" in evidence or "proof" in evidence:
             evidence_bonus = 0.5
-        
+
         if "authenticated" in evidence or "unauthenticated" in evidence:
             evidence_bonus += 0.5
-        
+
         final_score = (base_score * confidence_multiplier) + evidence_bonus
         return min(final_score, 10.0)
     

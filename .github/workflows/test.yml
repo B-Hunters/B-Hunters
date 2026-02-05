@@ -180,7 +180,7 @@ jobs:
           --cov-append \
           --cov-report=xml:coverage-integration.xml \
           --junitxml=junit-integration.xml \
-          -m "not slow" or CI
+          -m "not slow"
       env:
         PYTHONPATH: ${{ github.workspace }}
         MONGO_HOST: localhost
