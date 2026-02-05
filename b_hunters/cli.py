@@ -69,6 +69,25 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
     report_parser = subparsers.add_parser('report', help=f"{Fore.CYAN}Generate a scan report")
     report_parser.add_argument('--domain', '-d', type=str, required=True, help=f"{Fore.YELLOW}Specify the domain for the report")
     report_parser.add_argument('--output', '-o', type=str, help=f"{Fore.YELLOW}Optional path to save the report output")
+    report_parser.add_argument('--format', '-f', type=str, choices=['standard', 'json', 'html', 'pdf', 'executive', 'csv'], 
+                               default='standard', help=f"{Fore.YELLOW}Report format (default: standard)")
+    report_parser.add_argument('--export', '-e', type=str, choices=['jira', 'gitlab', 'sarif', 'defectdojo'],
+                               help=f"{Fore.YELLOW}Export format for third-party integration")
+
+    # Enhanced report command
+    enhanced_report_parser = subparsers.add_parser('enhanced-report', help=f"{Fore.CYAN}Generate enhanced security report with risk scoring")
+    enhanced_report_parser.add_argument('--domain', '-d', type=str, help=f"{Fore.YELLOW}Specify the domain for the report (omit for all domains)")
+    enhanced_report_parser.add_argument('--output', '-o', type=str, required=True, help=f"{Fore.YELLOW}Path to save the report output")
+    enhanced_report_parser.add_argument('--format', '-f', type=str, choices=['json', 'html', 'pdf', 'executive'], 
+                                       default='html', help=f"{Fore.YELLOW}Report format (default: html)")
+    enhanced_report_parser.add_argument('--compare', '-c', type=str, help=f"{Fore.YELLOW}Previous scan report for comparison")
+
+    # Export command
+    export_parser = subparsers.add_parser('export', help=f"{Fore.CYAN}Export findings to external tools")
+    export_parser.add_argument('--domain', '-d', type=str, required=True, help=f"{Fore.YELLOW}Specify the domain to export")
+    export_parser.add_argument('--format', type=str, choices=['jira', 'gitlab', 'sarif', 'csv', 'defectdojo'], 
+                              required=True, help=f"{Fore.YELLOW}Export format")
+    export_parser.add_argument('--output', '-o', type=str, help=f"{Fore.YELLOW}Output path for export file")
 
     # Status  command
     status_parser = subparsers.add_parser('status', help=f"{Fore.CYAN}Get the status of the system")
@@ -86,7 +105,28 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
         run_scan(args.domain, args.scantype, args.description)
 
     elif args.command == 'report':
-        generate_report(args.domain, args.output)
+        if args.format == 'standard' and not args.export:
+            generate_report(args.domain, args.output)
+        else:
+            generate_enhanced_report(
+                domain=args.domain,
+                output=args.output,
+                report_format=args.format,
+                export_format=args.export
+            )
+    elif args.command == 'enhanced-report':
+        generate_enhanced_report(
+            domain=args.domain,
+            output=args.output,
+            report_format=args.format,
+            compare_path=args.compare
+        )
+    elif args.command == 'export':
+        export_findings(
+            domain=args.domain,
+            export_format=args.format,
+            output=args.output
+        )
     elif args.command == 'status':
         global state, tools
         state = KartonState(producer.backend)
@@ -591,6 +631,226 @@ def restart_stuck_tasks():
                 minutes_inactive > STUCK_TASK_TIMEOUT_MINUTES):
                 logging.info(f"Restarting stuck task: {task.uid} for tool: {toolname}")
                 producer.backend.restart_task(task)
+
+def generate_enhanced_report(domain=None, output=None, report_format='html', compare_path=None, export_format=None):
+    """
+    Generate an enhanced security report with risk scoring.
+    
+    Args:
+        domain: Target domain (None for all domains)
+        output: Output path for the report
+        report_format: Output format (json, html, pdf, executive)
+        compare_path: Path to previous scan for comparison
+        export_format: Export format for third-party tools
+    """
+    from .reports import ReportGenerator, ReportExporter
+    import json
+    
+    generator = ReportGenerator()
+    exporter = ReportExporter()
+    
+    logging.info(f"{Fore.CYAN}Generating enhanced report...")
+    
+    # Get scan documents from database
+    collection = db["scans"]
+    
+    if domain:
+        query = {"Domain": re.sub(r'^https?://', '', domain).rstrip('/')}
+        scan = collection.find_one(query)
+        if not scan:
+            logging.error(f"{Fore.RED}Scan not found for domain: {domain}")
+            return
+        scan_id = str(scan["_id"])
+        logging.info(f"{Fore.GREEN}Found scan for domain: {scan['Domain']}")
+    else:
+        # Get all recent scans
+        scans = list(collection.find().sort("_id", -1).limit(10))
+        if not scans:
+            logging.error(f"{Fore.RED}No scans found in database")
+            return
+        # Use most recent scan
+        scan = scans[0]
+        scan_id = str(scan["_id"])
+        domain = scan["Domain"]
+        logging.info(f"{Fore.GREEN}Using most recent scan: {domain}")
+    
+    # Get domain documents
+    collection = db["domains"]
+    documents = list(collection.find({"Scanid": scan_id}))
+    
+    if not documents:
+        logging.error(f"{Fore.RED}No domain documents found")
+        return
+    
+    logging.info(f"{Fore.GREEN}Found {len(documents)} domain documents")
+    
+    # Ensure output path exists
+    if not output:
+        output = os.path.join("/tmp", f"enhanced_report_{domain}_{int(time.time())}")
+    
+    # Create output directory if needed
+    if report_format in ['html', 'pdf', 'executive'] and not output.endswith(('.html', '.pdf', '.json', '.txt')):
+        os.makedirs(output, exist_ok=True)
+    
+    # Handle comparison report
+    if compare_path:
+        try:
+            with open(compare_path, 'r') as f:
+                previous_data = json.load(f)
+            previous_documents = previous_data.get('scan_results', [])
+        except Exception as e:
+            logging.warning(f"{Fore.YELLOW}Could not load comparison file: {e}")
+            previous_documents = []
+        
+        comparison_path = output if output.endswith(('.html', '.json')) else os.path.join(output, "comparison.html")
+        generator.generate_comparative_report(previous_documents, documents, comparison_path, 'html')
+        logging.info(f"{Fore.GREEN}Comparison report saved to: {comparison_path}")
+        return
+    
+    # Generate report based on format
+    try:
+        if report_format == 'json':
+            if not output.endswith('.json'):
+                output = os.path.join(output, "report.json")
+            path = generator.generate_json_report(documents, output)
+            logging.info(f"{Fore.GREEN}JSON report saved to: {path}")
+            
+        elif report_format == 'html':
+            if not output.endswith('.html'):
+                output = os.path.join(output, "report.html")
+            path = generator.generate_html_report(documents, output)
+            logging.info(f"{Fore.GREEN}HTML report saved to: {path}")
+            
+        elif report_format == 'pdf':
+            if not output.endswith('.pdf'):
+                output = os.path.join(output, "report.pdf")
+            path = generator.generate_pdf_report(documents, output)
+            logging.info(f"{Fore.GREEN}PDF report saved to: {path}")
+            
+        elif report_format == 'executive':
+            if not output.endswith(('.html', '.json', '.txt')):
+                output = os.path.join(output, "executive.html")
+            ext = output.split('.')[-1] if '.' in output else 'html'
+            path = generator.generate_executive_summary(documents, output, ext)
+            logging.info(f"{Fore.GREEN}Executive summary saved to: {path}")
+            
+        elif report_format == 'standard':
+            generate_report(domain, output)
+            return
+            
+    except Exception as e:
+        logging.error(f"{Fore.RED}Error generating report: {e}")
+        return
+    
+    # Handle export format
+    if export_format:
+        findings = []
+        for doc in documents:
+            vulns = doc.get("Vulns", {})
+            for tool, tool_findings in vulns.items():
+                if isinstance(tool_findings, list):
+                    for finding in tool_findings:
+                        finding["tool"] = tool
+                        finding["domain"] = doc.get("Domain", "unknown")
+                        findings.append(finding)
+        
+        export_output = output.replace('.html', f'_export.{export_format}')
+        if export_format == 'json':
+            export_output = output.replace('.html', '_export.json')
+        elif export_format == 'csv':
+            export_output = output.replace('.html', '.csv')
+        
+        if export_format == 'jira':
+            data = exporter.export_to_jira(findings)
+            with open(export_output, 'w') as f:
+                json.dump(data, f, indent=2)
+        elif export_format == 'gitlab':
+            data = exporter.export_to_gitlab(findings)
+            with open(export_output, 'w') as f:
+                json.dump(data, f, indent=2)
+        elif export_format == 'sarif':
+            data = exporter.export_to_sarif(findings)
+            with open(export_output, 'w') as f:
+                json.dump(data, f, indent=2)
+        elif export_format == 'csv':
+            exporter.export_to_csv(findings, export_output)
+        elif export_format == 'defectdojo':
+            data = exporter.export_to_defectdojo(findings)
+            with open(export_output, 'w') as f:
+                json.dump(data, f, indent=2)
+        
+        logging.info(f"{Fore.GREEN}Export file saved to: {export_output}")
+
+
+def export_findings(domain, export_format, output=None):
+    """
+    Export findings to external tool formats.
+    
+    Args:
+        domain: Target domain
+        export_format: Export format (jira, gitlab, sarif, csv, defectdojo)
+        output: Output path (optional)
+    """
+    from .reports import ReportGenerator, ReportExporter
+    
+    exporter = ReportExporter()
+    
+    logging.info(f"{Fore.CYAN}Exporting findings to {export_format} format...")
+    
+    # Get scan data
+    domain = re.sub(r'^https?://', '', domain).rstrip('/')
+    collection = db["scans"]
+    scan = collection.find_one({"Domain": domain})
+    
+    if not scan:
+        logging.error(f"{Fore.RED}Scan not found for domain: {domain}")
+        return
+    
+    scan_id = str(scan["_id"])
+    collection = db["domains"]
+    documents = list(collection.find({"Scanid": scan_id}))
+    
+    if not documents:
+        logging.error(f"{Fore.RED}No domain documents found")
+        return
+    
+    # Extract findings
+    findings = []
+    for doc in documents:
+        vulns = doc.get("Vulns", {})
+        for tool, tool_findings in vulns.items():
+            if isinstance(tool_findings, list):
+                for finding in tool_findings:
+                    finding["tool"] = tool
+                    finding["domain"] = doc.get("Domain", "unknown")
+                    findings.append(finding)
+    
+    # Set default output path
+    if not output:
+        output = f"/tmp/{domain}_{export_format}_export.{export_format if export_format != 'csv' else 'csv'}"
+    
+    # Export based on format
+    if export_format == 'jira':
+        data = exporter.export_to_jira(findings)
+        with open(output, 'w') as f:
+            json.dump(data, f, indent=2)
+    elif export_format == 'gitlab':
+        data = exporter.export_to_gitlab(findings)
+        with open(output, 'w') as f:
+            json.dump(data, f, indent=2)
+    elif export_format == 'sarif':
+        data = exporter.export_to_sarif(findings)
+        with open(output, 'w') as f:
+            json.dump(data, f, indent=2)
+    elif export_format == 'csv':
+        exporter.export_to_csv(findings, output)
+    elif export_format == 'defectdojo':
+        data = exporter.export_to_defectdojo(findings)
+        with open(output, 'w') as f:
+            json.dump(data, f, indent=2)
+    
+    logging.info(f"{Fore.GREEN}Export saved to: {output}")
+
 
 if __name__ == "__main__":
     main()
