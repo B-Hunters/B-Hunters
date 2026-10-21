@@ -426,9 +426,7 @@ async def get_scan(
     public = scan.public()
     public["finding_counts"] = services.findings.severity_counts(scan_id)
     public["task_counts"] = services.tasks.counts_by_status(scan_id)
-    public["agents"] = [
-        strip_object_id(item) for item in services.agents.list_for_scan(scan_id)
-    ]
+    public["agents"] = [strip_object_id(item) for item in services.agents.list_for_scan(scan_id)]
     public["scope_violations"] = len(scan.scope.get("violations", []))
     return public
 

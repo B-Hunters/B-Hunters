@@ -260,9 +260,7 @@ def test_scans_can_be_listed(client, admin_user, auth_headers) -> None:
     assert response.json()["count"] >= 1
 
 
-def test_every_endpoint_returns_json_serialisable_documents(
-    client, authenticated, services
-) -> None:
+def test_every_endpoint_returns_json_serialisable_documents(client, authenticated, services) -> None:
     """No endpoint may leak a BSON ObjectId into a JSON response.
 
     A raw MongoDB document carries an ``_id`` that the JSON encoder cannot
@@ -278,9 +276,7 @@ def test_every_endpoint_returns_json_serialisable_documents(
             "scope": {"authorized_hosts": ["demo.test"]},
         }
     )
-    services.agents.upsert(
-        scan_id=scan.scan_id, role="recon", status="idle", conclusion="done"
-    )
+    services.agents.upsert(scan_id=scan.scan_id, role="recon", status="idle", conclusion="done")
     services.findings.upsert(
         scan_id=scan.scan_id,
         title="Finding",
@@ -299,7 +295,13 @@ def test_every_endpoint_returns_json_serialisable_documents(
         }
     )
     services.tool_calls.record(
-        {"scan_id": scan.scan_id, "task_id": "t", "agent_role": "recon", "tool": "list_findings", "status": "ok"}
+        {
+            "scan_id": scan.scan_id,
+            "task_id": "t",
+            "agent_role": "recon",
+            "tool": "list_findings",
+            "status": "ok",
+        }
     )
 
     paths = [
