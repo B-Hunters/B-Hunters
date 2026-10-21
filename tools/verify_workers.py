@@ -113,8 +113,10 @@ def s3_client():
     return boto3.client(
         "s3",
         endpoint_url="http://127.0.0.1:9000",
+        # The development artefact store's credentials.  This harness only
+        # ever runs against the local development stack.
         aws_access_key_id="bhunter",
-        aws_secret_access_key="bhunter_dev_secret",
+        aws_secret_access_key="bhunter_dev_secret",  # noqa: S106
         config=Config(signature_version="s3v4"),
     )
 
