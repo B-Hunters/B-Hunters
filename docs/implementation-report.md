@@ -363,6 +363,180 @@ These are real and were not worked around silently.
 
 ---
 
+## 6. The release and the scanner workers
+
+### 6.1 The release
+
+`b-hunters` **1.2.0** was built and published to PyPI:
+
+```
+$ python -m build
+Successfully built b_hunters-1.2.0.tar.gz and b_hunters-1.2.0-py3-none-any.whl
+
+$ twine check dist/*
+Checking dist/b_hunters-1.2.0-py3-none-any.whl: PASSED
+Checking dist/b_hunters-1.2.0.tar.gz: PASSED
+
+$ twine upload --config-file /tmp/pypirc.bh dist/*
+https://pypi.org/project/b-hunters/1.2.0/
+```
+
+The wheel was verified by installing it into a clean virtual environment:
+
+```
+$ pip install b-hunters==1.2.0
+$ python -c "import b_hunters; print(b_hunters.__version__)"
+1.2.0
+$ python -c "from b_hunters.platform.security.scope import is_blocked_ip; print(is_blocked_ip('169.254.169.254'))"
+True
+```
+
+The wheel carries the 53 platform modules and the four web assets.  The
+upload token was written to a file with mode `600`, used once and removed;
+it was never written to the repository.
+
+**This is what makes the base-class fixes reach the workers.**  Every
+worker installs `b-hunters` from PyPI, so all 17 Dockerfiles were bumped
+from `1.1.13`/`1.1.16` to `1.2.0`.  The limitation recorded in §5 is
+therefore resolved.
+
+### 6.2 The workers as real containers
+
+All 17 worker repositories were built as images and run as containers
+against a live stack: the Karton router (`certpl/karton-system:v5.5.0`),
+Redis, MongoDB and an S3-compatible artefact store (`rustfs/rustfs`),
+all on one Docker network, with the laboratory applications on a second.
+
+```
+$ docker build -q -t b-hunters-local/nuclei:1.2.0 repos/B-Hunters-Nuclei
+$ docker run -d --name bh-worker-nuclei --network dev_default \
+    -v dev/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro \
+    -e BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini \
+    b-hunters-local/nuclei:1.2.0
+```
+
+A worker image was confirmed to carry the fixed base class:
+
+```
+$ docker run --rm --entrypoint sh b-hunters-local/nmap:1.2.0 -c '...'
+b_hunters version: 1.2.0
+scope guard covers 169.254.169.254: True
+failure comparison fixed: True
+```
+
+### 6.3 The contract verifier
+
+`b_hunters/platform/scanners/contracts.py` reads the worker sources and
+checks that they agree on the Karton message contract.  It is exposed as
+`b-hunters contracts` and as a test.
+
+```
+$ b-hunters contracts --workers /path/to/repos
+Checked 17 worker repositories
+```
+
+It found seven real defects, all now fixed:
+
+| Defect | Worker |
+|---|---|
+| The status was reported against the JavaScript asset URL | `jsscanner` |
+| The status was never reported at all | `GetJS`, `Web-Technology` |
+| The status referenced an undefined variable, so every task raised a `NameError` | `Web-Technology` |
+| The scan ran twice | `Web-Technology` |
+| The task filters depended on an environment variable | `Nuclei` |
+| A dead `type: file` key in the payload | `GoSpider`, `Katana`, `ParamSpider`, `Wayback` |
+| A host with no open ports raised a `KeyError` | `NMap` |
+
+The verifier now reports **0 errors and 0 warnings** across the 17
+workers.
+
+### 6.4 The toolchain defects that stopped the images building
+
+| Worker | Defect | Fix |
+|---|---|---|
+| `Katana` | `golang:1.21.1` cannot build the current release | `golang:1.26`, the tool pinned to `v1.8.0` |
+| `Gowitness` | the same Go version problem | `golang:1.26-bookworm` |
+| `GetJS` | the module path has upper case letters, which the Go proxy rejects, and the release predates Go modules | Built from a pinned clone with the module initialised in the build |
+| `Web-Technology` | the tool was rewritten in Go, so `pip install` no longer works, and the worker still used the old flags and text format | Built from a pinned commit; the worker reads the tool's JSON output |
+
+### 6.5 The identity defect
+
+Karton's configuration **overrides** a worker's class-level identity:
+
+```python
+if self.config.has_option("karton", "identity"):
+    self.identity = self.config.get("karton", "identity")
+```
+
+A shared configuration that names an identity therefore makes every
+worker register under the same name.  The worker configuration
+deliberately has no `[karton] identity` option, so each worker uses its
+own.  This was found by running the workers, not by reading them: the
+first run showed `failed: ['B-Hunters-Platform']` where the worker's own
+identity belonged.
+
+### 6.6 The per-worker output verification
+
+`verify_workers.py` starts each worker, sends it the task type it binds
+to, and checks that it reported its status under its own identity and
+wrote into the report field it is responsible for.
+
+```
+worker           status       reported   output
+nmap             ok           finished   {"Ports": 1}
+dirsearch        ok           finished   {"Paths": 0}
+paramspider      ok           finished   {"Paths": 0}
+webtechnology    ok           finished   {"Technology": 1}
+nuclei           ok           finished   {"Vulns": 0}
+sqlmap           ok           finished   {"Vulns": 0}
+dalfox           ok           finished   {"Vulns": 0}
+ssti             ok           finished   {"Vulns": 0}
+katana           ok           finished   {"Paths": 0}
+gospider         ok           finished   {"Paths": 0}
+wayback          ok           finished   {"Paths": 0}
+jsscanner        ok           finished   {"js_documents": 1}
+getjs            ok           finished   {"js_documents": 0}
+gowitness        ok           finished   {"Screenshot": false}
+```
+
+A `Vulns: 0` result is a correct result: the tool ran and found nothing
+on the target.  The check is that the worker **ran** and **reported**,
+which is what "the same way of reporting to Karton" means.
+
+The path-consuming workers are given their input the way a real scan
+gives it to them: the harness uploads the URL list to the artefact store
+under the key the worker downloads it from, which is how the key
+convention was confirmed.
+
+### 6.7 The laboratory
+
+Three applications run at once, each pinned by digest, each on the
+laboratory network and the worker network, and each reachable with the
+same URL from the platform process and from the worker containers:
+
+| Application | Version | Digest | Port |
+|---|---|---|---|
+| Damn Vulnerable GraphQL Application | 2.2.0 | `sha256:040aa33c…` | 5013 |
+| OWASP Juice Shop | latest (pinned) | `sha256:42843723…` | 3000 |
+| OWASP WebGoat | latest (pinned) | `sha256:95c23e70…` | 8080 |
+
+Two things had to be fixed to make this work:
+
+* **The readiness gate is host-side.**  Juice Shop has no shell at all and
+  WebGoat has neither curl nor python, so an in-container health check
+  cannot be relied on.  The gate is a TCP connect plus an HTTP request
+  from the host.
+* **The published port is separate from the in-network port.**  Port
+  3000 on the host was already taken by an unrelated container, so the
+  laboratory publishes Juice Shop on 3300 while the scan always uses the
+  in-network port.
+
+The Juice Shop container was also killed by the out-of-memory killer
+during the run; the heap is now capped and the containers have a memory
+limit.
+
+---
+
 ## 6. Recommended next steps
 
 1. **Publish `1.2.0` and bump the 17 worker Dockerfiles.** This is the

@@ -149,6 +149,7 @@ class LabManager:
             f"    image: {manifest.image_ref}\n"
             f"    container_name: bh-bench-{manifest.slug}\n"
             f'    restart: "no"\n'
+            f"    mem_limit: {manifest.memory_limit}\n"
             f"{command}{ports}"
             f"    environment:\n{environment_block}"
             f"    networks:\n      - {LAB_NETWORK}\n{extra_service_networks}"

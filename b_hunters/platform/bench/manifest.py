@@ -90,6 +90,8 @@ class BenchmarkApplication:
     #: The port published on the loopback interface for convenience.  The
     #: scan always uses ``port``; this only affects a manual ``curl``.
     publish_port: int = 0
+    #: The memory limit for the container, in bytes.
+    memory_limit: int = 1024 * 1024 * 1024
     description: str = ""
     #: Command or environment needed to start it.
     start_command: list[str] = field(default_factory=list)
@@ -293,6 +295,9 @@ def juice_shop_manifest() -> BenchmarkApplication:
         slug="juice-shop",
         name="OWASP Juice Shop",
         version="latest (digest pinned)",
+        # The Node.js heap is capped so that the application cannot be
+        # killed by the out-of-memory killer on a busy host.
+        environment={"NODE_OPTIONS": "--max-old-space-size=512"},
         image="bkimminich/juice-shop:latest",
         digest="sha256:42843723a7bf4246aa5d63c324978b17ef296ac78434aeddd34c427bfb5853f4",
         port=3000,
