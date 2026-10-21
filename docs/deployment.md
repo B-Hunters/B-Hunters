@@ -48,7 +48,60 @@ production.
 | MinIO | `minio/minio:<pinned>` | 1 | Internal only |
 | Scanner workers | `bormaa/<tool>:1.1.16` | as needed | Egress only to the targets |
 
-### 2.2 Required configuration
+### 2.2 The configuration file
+
+The legacy CLI and the Karton workers read the **same** file, so it must
+carry both the Karton sections and the legacy ones. This is the format
+the original deployment used:
+
+```ini
+[karton]
+identity = B-Hunters-Platform
+
+[redis]
+host = redis
+port = 6379
+password = <secret>
+db = 0
+
+[minio]
+access_key = <secret>
+secret_key = <secret>
+address = http://minio:9000
+secure = 0
+
+[s3]
+access_key = <secret>
+secret_key = <secret>
+address = http://minio:9000
+bucket = bhunters
+
+[mongo]
+user = <user>
+password = <secret>
+db = b-hunters
+host = mongo
+port = 27017
+
+; Optional.  A worker without a webhook skips the notification.
+[Webhook]
+discord_report = https://discord.com/api/webhooks/...
+discord_task_status = https://discord.com/api/webhooks/...
+```
+
+Point the platform at it with `BHUNTERS_CONFIG` (or `-c` for the CLI):
+
+```bash
+export BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+b-hunters -c /etc/b-hunters/b-hunters.ini scan -d example.com -t multi
+```
+
+The `[mongo]` and `[s3]` sections are mapped onto the platform's
+environment variables when the corresponding `BHUNTERS_*` variable is not
+set, so a single file can configure both the legacy tools and the
+platform.
+
+### 2.3 Required configuration
 
 ```bash
 BHUNTERS_ENVIRONMENT=production
@@ -71,7 +124,7 @@ Vault). Never bake them into an image, never commit them, and prefer
 injecting them at run time over putting them in a long-lived process
 environment.
 
-### 2.3 First administrator
+### 2.4 First administrator
 
 There is no default credential and no self-registration.
 
@@ -89,7 +142,7 @@ lower case, upper case, digits and symbols. Change it after the first
 sign-in; the platform invalidates every other session on a password
 change.
 
-### 2.4 Health checks
+### 2.5 Health checks
 
 | Endpoint | Purpose | Behaviour |
 |---|---|---|
@@ -99,7 +152,7 @@ change.
 
 A load balancer should use `/readyz` for its readiness probe.
 
-### 2.5 Network policy
+### 2.6 Network policy
 
 The platform makes outbound requests to the authorised targets. Restrict
 container egress to the approved target set at the network layer — the
@@ -114,7 +167,7 @@ network. In particular:
 * do **not** publish Redis, MongoDB or MinIO on all interfaces;
 * do **not** expose the Karton dashboard to untrusted users.
 
-### 2.6 Backup and restore
+### 2.7 Backup and restore
 
 **MongoDB** holds the scans, findings, events, audit log and agent
 definitions. Back it up with `mongodump`:
@@ -145,7 +198,7 @@ Restore the database before the artefact store: the findings reference
 artefact keys, and a restore in the other order would leave the references
 dangling until the artefacts arrive.
 
-### 2.7 Retention
+### 2.8 Retention
 
 The platform applies retention when `apply_retention` is called (on a
 schedule, from an administrative job):
