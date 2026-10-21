@@ -84,6 +84,12 @@ class BenchmarkApplication:
     license: str
     upstream: str
     maintenance: str
+    #: The digest of the image that was measured, when it is known.  A tag
+    #: such as ``latest`` moves; a digest does not.
+    digest: str = ""
+    #: The port published on the loopback interface for convenience.  The
+    #: scan always uses ``port``; this only affects a manual ``curl``.
+    publish_port: int = 0
     description: str = ""
     #: Command or environment needed to start it.
     start_command: list[str] = field(default_factory=list)
@@ -93,6 +99,8 @@ class BenchmarkApplication:
     healthcheck_command: list[str] = field(default_factory=list)
     #: Base URL used inside the isolated network.
     internal_url: str = ""
+    #: The name the application is reachable under from the worker network.
+    internal_host: str = ""
     #: How long to wait for the container to become ready.
     startup_seconds: int = 60
     test_cases: list[TestCase] = field(default_factory=list)
@@ -103,7 +111,15 @@ class BenchmarkApplication:
         data = asdict(self)
         data["test_cases"] = [case.to_dict() for case in self.test_cases]
         data["test_count"] = len(self.test_cases)
+        data["image_ref"] = self.image_ref
         return data
+
+    @property
+    def image_ref(self) -> str:
+        """The reference to pull: the digest when known, otherwise the tag."""
+        if self.digest:
+            return f"{self.image}@{self.digest}"
+        return self.image
 
 
 def _case(
@@ -154,6 +170,7 @@ def dvga_manifest() -> BenchmarkApplication:
         name="Damn Vulnerable GraphQL Application",
         version="2.2.0",
         image="dolevf/dvga:2.2.0",
+        digest="sha256:040aa33c199d99f3380c9ff9a1ee5d725e9abca7b189c63a35a2a73bda79c957",
         port=5013,
         license="MIT",
         upstream="https://github.com/dolevf/damn-vulnerable-graphql-application",
@@ -275,9 +292,11 @@ def juice_shop_manifest() -> BenchmarkApplication:
     return BenchmarkApplication(
         slug="juice-shop",
         name="OWASP Juice Shop",
-        version="17.6.0",
-        image="bkimminich/juice-shop:v17.6.0",
+        version="latest (digest pinned)",
+        image="bkimminich/juice-shop:latest",
+        digest="sha256:42843723a7bf4246aa5d63c324978b17ef296ac78434aeddd34c427bfb5853f4",
         port=3000,
+        publish_port=3300,
         license="MIT",
         upstream="https://github.com/juice-shop/juice-shop",
         maintenance="maintained",
@@ -361,8 +380,9 @@ def webgoat_manifest() -> BenchmarkApplication:
     return BenchmarkApplication(
         slug="webgoat",
         name="OWASP WebGoat",
-        version="2023.7",
-        image="webgoat/webgoat:2023.7",
+        version="latest (digest pinned)",
+        image="webgoat/webgoat:latest",
+        digest="sha256:95c23e70502d0e0e11a826a73889e2ca93f965171202c17c0c59353ba67be86a",
         port=8080,
         license="Apache-2.0",
         upstream="https://github.com/WebGoat/WebGoat",
@@ -371,8 +391,9 @@ def webgoat_manifest() -> BenchmarkApplication:
             "A deliberately insecure teaching application with lesson-by-lesson "
             "vulnerabilities covering injection, XSS, broken access control and more."
         ),
-        healthcheck_path="/",
-        startup_seconds=90,
+        # WebGoat serves its lessons under the /WebGoat context path.
+        healthcheck_path="/WebGoat",
+        startup_seconds=120,
         test_cases=[
             _case(
                 "webgoat-xss",

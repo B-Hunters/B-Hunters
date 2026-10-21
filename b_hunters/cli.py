@@ -108,6 +108,10 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
     bench_run.add_argument('--start-lab', action='store_true')
     bench_sub.add_parser('scores', help=f"{Fore.YELLOW}Show the recorded benchmark scores")
 
+    contracts_parser = subparsers.add_parser('contracts', help=f"{Fore.CYAN}Check the worker message contracts")
+    contracts_parser.add_argument('--workers', type=str, default='', help=f"{Fore.YELLOW}Directory holding the worker repositories")
+    contracts_parser.add_argument('--strict', action='store_true', help=f"{Fore.YELLOW}Exit non-zero on warnings as well as errors")
+
     # Parse the arguments
     args = parser.parse_args()
 
@@ -118,6 +122,8 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
         return _admin(args)
     if args.command == 'bench':
         return _bench(args)
+    if args.command == 'contracts':
+        return _contracts(args)
 
     config = Config(path=args.config)
     global db, s3,producer
@@ -904,6 +910,51 @@ def _bench(args):
         return 0
 
     return 1
+
+
+
+
+def _contracts(args):
+    """Check that every worker agrees on the Karton message contract."""
+    from pathlib import Path
+
+    from b_hunters.platform.scanners.contracts import verify_repository_set
+
+    root = Path(args.workers) if args.workers else Path(__file__).resolve().parents[2] / "repos"
+    if not root.is_dir():
+        logging.error(f"{Fore.RED}The worker directory {root} does not exist")
+        return 1
+
+    repositories = [
+        directory
+        for directory in sorted(root.iterdir())
+        if directory.is_dir()
+        and directory.name != "B-Hunters"
+        and any(directory.glob("*/*.py"))
+    ]
+    contracts, findings = verify_repository_set(repositories)
+    logging.info(f"{Fore.CYAN}Checked {len(contracts)} worker repositories")
+
+    errors = [finding for finding in findings if finding.severity == "error"]
+    warnings = [finding for finding in findings if finding.severity == "warning"]
+    notes = [finding for finding in findings if finding.severity == "info"]
+
+    for finding in errors:
+        logging.error(f"{Fore.RED}{finding}")
+    for finding in warnings:
+        logging.info(f"{Fore.YELLOW}{finding}")
+    for finding in notes:
+        logging.info(f"{Fore.CYAN}{finding}")
+
+    if errors:
+        logging.error(f"{Fore.RED}{len(errors)} contract error(s)")
+        return 1
+    if warnings and args.strict:
+        logging.error(f"{Fore.RED}{len(warnings)} contract warning(s)")
+        return 1
+    if not findings:
+        logging.info(f"{Fore.GREEN}Every worker agrees on the message contract.")
+    return 0
 
 
 if __name__ == "__main__":

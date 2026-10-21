@@ -41,6 +41,18 @@ from .scoring import (
 
 log = logging.getLogger(__name__)
 
+
+def lab_host(manifest: BenchmarkApplication) -> str:
+    """The name the laboratory is reachable under.
+
+    The applications are published on the loopback interface, so the host
+    resolves this name to ``127.0.0.1``; the worker containers resolve it
+    through Docker DNS on the worker network.  One name, one URL, both
+    callers.
+    """
+    return manifest.internal_host or f"bench-{manifest.slug}"
+
+
 #: How long to wait for a scan to reach a terminal state.
 SCAN_TIMEOUT_SECONDS = 3600
 
@@ -129,7 +141,7 @@ class BenchmarkRunner:
                     for case in manifest.test_cases
                 ]
 
-        base_url = manifest.internal_url or f"http://127.0.0.1:{manifest.port}"
+        base_url = manifest.internal_url or f"http://{lab_host(manifest)}:{manifest.port}"
         try:
             scan_id = await self._start_scan(manifest, base_url, config)
         except Exception as exc:
@@ -187,7 +199,12 @@ class BenchmarkRunner:
         scan = await self.scan_creator(
             name=f"benchmark:{manifest.slug}:{int(time.time())}",
             targets=[base_url],
-            authorized_hosts=["127.0.0.1", "localhost", manifest.slug],
+            authorized_hosts=[
+                "127.0.0.1",
+                "localhost",
+                manifest.slug,
+                lab_host(manifest),
+            ],
             profile=config.profile,
             allow_private_network=True,
             allow_state_changing=False,

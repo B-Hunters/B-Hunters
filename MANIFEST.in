@@ -1,0 +1,10 @@
+include README.md
+include requirements.txt
+include pytest.ini
+include ruff.toml
+recursive-include b_hunters/web *.html *.js *.css *.svg
+recursive-include docs *.md
+recursive-include tests *.py
+exclude .gitignore
+global-exclude *.py[cod]
+global-exclude __pycache__
