@@ -149,6 +149,12 @@ class LabManager:
             f"    image: {manifest.image_ref}\n"
             f"    container_name: bh-bench-{manifest.slug}\n"
             f'    restart: "no"\n'
+            # Some upstream images declare a health check that uses a tool
+            # the image does not contain, so the container is reported as
+            # unhealthy even while it serves perfectly well.  The platform
+            # gates readiness from the host instead.
+            f"    healthcheck:\n"
+            f"      disable: true\n"
             f"    mem_limit: {manifest.memory_limit}\n"
             f"{command}{ports}"
             f"    environment:\n{environment_block}"

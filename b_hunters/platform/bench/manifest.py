@@ -297,11 +297,15 @@ def juice_shop_manifest() -> BenchmarkApplication:
         version="latest (digest pinned)",
         # The Node.js heap is capped so that the application cannot be
         # killed by the out-of-memory killer on a busy host.
-        environment={"NODE_OPTIONS": "--max-old-space-size=512"},
+        # The Node.js heap has to be large enough for the search index that
+        # Juice Shop builds at start-up; a smaller cap makes the process
+        # abort with an out-of-memory error.
+        environment={"NODE_OPTIONS": "--max-old-space-size=1536"},
         image="bkimminich/juice-shop:latest",
         digest="sha256:42843723a7bf4246aa5d63c324978b17ef296ac78434aeddd34c427bfb5853f4",
         port=3000,
         publish_port=3300,
+        memory_limit=3 * 1024 * 1024 * 1024,
         license="MIT",
         upstream="https://github.com/juice-shop/juice-shop",
         maintenance="maintained",

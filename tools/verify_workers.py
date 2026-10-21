@@ -22,7 +22,6 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 from bson import ObjectId
 from karton.core import Config, Producer, Task
