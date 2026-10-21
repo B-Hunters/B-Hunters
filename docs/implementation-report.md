@@ -499,6 +499,13 @@ getjs            ok           finished   {"js_documents": 0}
 gowitness        ok           finished   {"Screenshot": false}
 ```
 
+**14 of the 16 workers that can be driven this way reported their
+status.**  The two that did not are the slowest scanners: `wapiti` and
+`xray` were still running when the measurement window closed.  Both
+bind to `subdomain`/`new` like the other twelve, and both were seen
+receiving and processing the task, so the gap is a measurement window
+rather than a contract defect.  Neither is counted as a pass.
+
 A `Vulns: 0` result is a correct result: the tool ran and found nothing
 on the target.  The check is that the worker **ran** and **reported**,
 which is what "the same way of reporting to Karton" means.
