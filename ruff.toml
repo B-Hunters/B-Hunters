@@ -1,0 +1,67 @@
+line-length = 110
+target-version = "py310"
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "B",   # bugbear
+    "C4",  # comprehensions
+    "UP",  # pyupgrade
+    "S",   # bandit
+    "ASYNC",
+]
+ignore = [
+    "E501",    # line length is handled by the formatter
+    "UP045",   # the codebase uses typing.Optional consistently
+    "UP007",   # ... and typing.Union
+
+    # --- deliberate design decisions -------------------------------------
+    # A vulnerability scanner must be able to test an expired, self-signed
+    # or misconfigured certificate: that is frequently the finding itself.
+    "S501",
+    # The benchmark laboratory manages Docker containers; shelling out to
+    # the docker CLI is the mechanism.
+    "S603",
+    "S607",
+    # "SECRET_DETECTION" is a capability name, not a credential.
+    "S105",
+    # The scratch workspace and the report output directory default to
+    # /tmp; the orchestrator overrides the workspace per agent.
+    "S108",
+    # Binding to 0.0.0.0 is the container default; a deployment sets
+    # BHUNTERS_HOST explicitly.
+    "S104",
+    # The legacy worker base class uses random for scratch file names and
+    # md5 to shorten a filename.  Neither is a security control.
+    "S311",
+    "S324",
+    # The worker base class and the CLI raise bare exceptions; changing
+    # them would alter the exception types the workers depend on.
+    "B904",
+    "B026",
+
+    # FastAPI's Depends() in a default argument is the documented
+    # idiom for declaring a dependency.
+    "B008",
+]
+
+[lint.per-file-ignores]
+"tests/**" = ["S", "B011", "B017", "E402", "F841"]
+"b_hunters/cli.py" = ["E402", "F841"]
+"b_hunters/platform/api/app.py" = ["E402"]
+
+[lint.flake8-bandit]
+# The platform legitimately talks to HTTP endpoints and runs subprocesses.
+# Both are governed by the scope enforcer and the command policy.
+
+[format]
+# The legacy worker base class and CLI predate the formatter and are kept
+# in their original style so that the diff against the upstream file stays
+# reviewable.  New code is formatted.
+exclude = [
+    "b_hunters/bhunter.py",
+    "b_hunters/cli.py",
+]

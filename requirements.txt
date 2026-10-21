@@ -1,5 +1,14 @@
+# Core framework requirements (installed by every worker).
 karton-core==5.5.0
-pymongo
-tldextract
-requests
-colorama
+pymongo>=4.6,<5
+tldextract>=5.1
+requests>=2.31
+colorama>=0.4.6
+
+# Platform requirements.  Installed with `pip install "b-hunters[platform]"`.
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.27,<1.0
+httpx>=0.26,<1.0
+pydantic>=2.6,<3.0
+argon2-cffi>=23.1
+jsonschema>=4.20

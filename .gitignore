@@ -2,3 +2,15 @@ rebuildandpush.sh
 *.egg-info
 dist/
 build/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+*.local.ini
+.coverage
+htmlcov/
+docs/_build/

@@ -1,15 +1,17 @@
-import logging
 import argparse
-from colorama import Fore, Style, init
-from karton.core import Config, Resource, Task
-from karton.core import Producer, Task
-import pymongo
-import re
-import os
-import json
-from karton.core.inspect import KartonAnalysis, KartonQueue, KartonState
-import time
 import datetime
+import json
+import logging
+import os
+import re
+import time
+
+import pymongo
+from colorama import Fore, Style, init
+from karton.core import Config, Producer, Task
+from karton.core.inspect import KartonState
+
+
 def monogocon(config):
     mongoconfig=config["mongo"]
     username =mongoconfig["user"]
@@ -24,7 +26,7 @@ def monogocon(config):
     try:
         client.admin.command('ping')
     except pymongo.errors.ConnectionFailure:
-        raise Exception("Mongo Connection Failed")
+        raise Exception("Mongo Connection Failed") from None
 
     db = client[db]
     return db
@@ -39,7 +41,7 @@ def main():
     )
 
     # Display banner
-    banner = f"""
+    banner = rf"""
 {Fore.BLUE}$$$$$$$\          $$\   $$\                      $$\
 $$  __$$\         $$ |  $$ |                     $$ |
 $$ |  $$ |        $$ |  $$ |$$\   $$\ $$$$$$$\ $$$$$$\    $$$$$$\   $$$$$$\   $$$$$$$\
@@ -73,8 +75,50 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
     # Status  command
     status_parser = subparsers.add_parser('status', help=f"{Fore.CYAN}Get the status of the system")
     status_parser.add_argument('-s','--stuck', action='store_true', help=f"{Fore.YELLOW}Optional argument to restart stuck tasks periodically")
+
+    # --- platform commands ------------------------------------------------
+    serve_parser = subparsers.add_parser('serve', help=f"{Fore.CYAN}Run the authenticated platform API and web UI")
+    serve_parser.add_argument('--host', type=str, default=None, help=f"{Fore.YELLOW}Bind address")
+    serve_parser.add_argument('--port', type=int, default=None, help=f"{Fore.YELLOW}Bind port")
+    serve_parser.add_argument('--reload', action='store_true', help=f"{Fore.YELLOW}Enable auto-reload (development only)")
+
+    admin_parser = subparsers.add_parser('admin', help=f"{Fore.CYAN}Platform administration")
+    admin_sub = admin_parser.add_subparsers(dest='admin_command', required=True)
+    bootstrap = admin_sub.add_parser('bootstrap', help=f"{Fore.YELLOW}Create the initial administrator account")
+    bootstrap.add_argument('--username', type=str, default='admin')
+    bootstrap.add_argument('--password', type=str, default=None, help=f"{Fore.YELLOW}Read the password from BHUNTERS_BOOTSTRAP_PASSWORD or prompt for it")
+    add_user = admin_sub.add_parser('add-user', help=f"{Fore.YELLOW}Create a platform user")
+    add_user.add_argument('--username', type=str, required=True)
+    add_user.add_argument('--password', type=str, default=None)
+    add_user.add_argument('--role', type=str, default='viewer', choices=['admin', 'operator', 'viewer'])
+    admin_sub.add_parser('list-users', help=f"{Fore.YELLOW}List the platform users")
+    admin_sub.add_parser('init-db', help=f"{Fore.YELLOW}Create the database indexes")
+    admin_sub.add_parser('seed-roles', help=f"{Fore.YELLOW}Seed the built-in agent definitions")
+
+    bench_parser = subparsers.add_parser('bench', help=f"{Fore.CYAN}Vulnerable application benchmark laboratory")
+    bench_sub = bench_parser.add_subparsers(dest='bench_command', required=True)
+    bench_sub.add_parser('sync', help=f"{Fore.YELLOW}Load the benchmark manifests into the database")
+    bench_lab = bench_sub.add_parser('lab', help=f"{Fore.YELLOW}Manage the vulnerable application laboratory")
+    bench_lab.add_argument('action', choices=['up', 'down', 'status'])
+    bench_lab.add_argument('--applications', type=str, default='', help=f"{Fore.YELLOW}Comma separated application slugs")
+    bench_run = bench_sub.add_parser('run', help=f"{Fore.YELLOW}Run the benchmark suite")
+    bench_run.add_argument('--applications', type=str, default='', help=f"{Fore.YELLOW}Comma separated application slugs")
+    bench_run.add_argument('--provider', type=str, default='')
+    bench_run.add_argument('--profile', type=str, default='standard')
+    bench_run.add_argument('--start-lab', action='store_true')
+    bench_sub.add_parser('scores', help=f"{Fore.YELLOW}Show the recorded benchmark scores")
+
     # Parse the arguments
     args = parser.parse_args()
+
+    # The platform commands do not need the legacy Karton/Mongo bootstrap.
+    if args.command == 'serve':
+        return _serve(args)
+    if args.command == 'admin':
+        return _admin(args)
+    if args.command == 'bench':
+        return _bench(args)
+
     config = Config(path=args.config)
     global db, s3,producer
     db=monogocon(config)
@@ -470,7 +514,7 @@ def generate_report(domain, output=None):
     subdomains=[]
     for document in documents:
         subdomains.append(document["Domain"])
-        if document["active"]==True:
+        if document["active"]:
 
             domain=document["Domain"]
             logging.info(f"{Fore.MAGENTA}Creating report for domain {domain}")
@@ -592,7 +636,275 @@ def restart_stuck_tasks():
                 logging.info(f"Restarting stuck task: {task.uid} for tool: {toolname}")
                 producer.backend.restart_task(task)
 
+
+
+
+
+# ----------------------------------------------------------------------
+# Platform commands
+# ----------------------------------------------------------------------
+def _platform_services():
+    """Build the platform service container from the environment/INI file."""
+    from b_hunters.platform.api.deps import Services
+    from b_hunters.platform.db.client import Database
+    from b_hunters.platform.settings import load_settings
+
+    settings = load_settings()
+    database = Database(settings)
+    services = Services(database, settings)
+    services.ensure_indexes()
+    return services
+
+
+def _serve(args):
+    """Run the authenticated platform API and web UI."""
+    import uvicorn
+
+    from b_hunters.platform.api.app import create_app
+    from b_hunters.platform.settings import load_settings
+
+    settings = load_settings()
+    host = args.host or settings.host
+    port = args.port or settings.port
+    logging.info(
+        f"{Fore.GREEN}Starting the B-Hunters platform on http://{host}:{port} "
+        f"(environment: {settings.environment})"
+    )
+    uvicorn.run(
+        create_app(settings),
+        host=host,
+        port=port,
+        reload=bool(args.reload),
+        log_level=settings.log_level.lower(),
+    )
+    return 0
+
+
+def _admin(args):
+    """Platform administration commands."""
+    from b_hunters.platform.security.passwords import validate_password_strength
+
+    services = _platform_services()
+
+    if args.admin_command == 'init-db':
+        logging.info(f"{Fore.GREEN}Database indexes are up to date.")
+        return 0
+
+    if args.admin_command == 'seed-roles':
+        from b_hunters.platform.agents.roles import default_role_definitions
+
+        created = 0
+        for definition in default_role_definitions():
+            existing = services.agent_definitions.get_by_role_and_name(
+                definition["name"], definition["role"]
+            ) if hasattr(services.agent_definitions, "get_by_role_and_name") else None
+            if existing is None:
+                services.agent_definitions.create(definition)
+                created += 1
+        logging.info(f"{Fore.GREEN}Seeded {created} agent definition(s).")
+        return 0
+
+    if args.admin_command == 'list-users':
+        users = services.users.list_users()
+        if not users:
+            logging.info(f"{Fore.YELLOW}No users exist yet.")
+            return 0
+        for user in users:
+            public = services.users.public(user)
+            logging.info(
+                f"{Fore.CYAN}{public['username']:<24} {public['role']:<10} "
+                f"active={public['active']}"
+            )
+        return 0
+
+    if args.admin_command in {'bootstrap', 'add-user'}:
+        username = args.username
+        password = args.password
+        if not password:
+            password = os.environ.get("BHUNTERS_BOOTSTRAP_PASSWORD")
+        if not password:
+            try:
+                import getpass
+
+                password = getpass.getpass(f"Password for '{username}': ")
+            except (EOFError, KeyboardInterrupt):
+                logging.error(f"{Fore.RED}No password supplied; aborting.")
+                return 1
+        problems = validate_password_strength(password)
+        if problems:
+            for problem in problems:
+                logging.error(f"{Fore.RED}{problem}")
+            return 1
+        role = "admin" if args.admin_command == "bootstrap" else args.role
+        try:
+            user = services.users.create(
+                username=username, password=password, role=role
+            )
+        except Exception as exc:
+            logging.error(f"{Fore.RED}Could not create the user: {exc}")
+            return 1
+        services.audit.record(
+            action="user.create",
+            actor="cli",
+            target_type="user",
+            target_id=user["user_id"],
+            detail={"username": user["username"], "role": role},
+        )
+        logging.info(
+            f"{Fore.GREEN}Created {role} user '{username}'. "
+            f"Change the password immediately after the first sign-in."
+        )
+        return 0
+
+    return 1
+
+
+def _bench(args):
+    """Vulnerable application benchmark commands."""
+    import json
+
+    from b_hunters.platform.bench.lab import LabManager
+    from b_hunters.platform.bench.manifest import default_manifests
+
+    services = _platform_services()
+    lab = LabManager()
+
+    if args.bench_command == 'sync':
+        for manifest in default_manifests():
+            services.db.collection("platform_benchmarks").update_one(
+                {"slug": manifest.slug}, {"$set": manifest.to_dict()}, upsert=True
+            )
+        logging.info(
+            f"{Fore.GREEN}Synced {len(default_manifests())} benchmark manifest(s)."
+        )
+        return 0
+
+    if args.bench_command == 'lab':
+        applications = [a.strip() for a in args.applications.split(',') if a.strip()]
+        if args.action == 'up':
+            try:
+                result = lab.up(applications or None)
+            except Exception as exc:
+                logging.error(f"{Fore.RED}{exc}")
+                return 1
+            logging.info(f"{Fore.GREEN}Laboratory started: {result}")
+        elif args.action == 'down':
+            logging.info(f"{Fore.GREEN}Laboratory stopped: {lab.down()}")
+        else:
+            status = lab.status()
+            logging.info(f"{Fore.CYAN}Laboratory running: {status.running}")
+            for application in status.applications:
+                logging.info(
+                    f"  {application.get('slug')}: {application.get('state')} {application.get('status','')}"
+                )
+        return 0
+
+    if args.bench_command == 'run':
+        import asyncio
+
+        from b_hunters.platform.bench.runner import BenchmarkRunConfig, BenchmarkRunner
+
+        applications = [a.strip() for a in args.applications.split(',') if a.strip()]
+        if args.start_lab:
+            try:
+                lab.up(applications or None)
+            except Exception as exc:
+                logging.error(f"{Fore.RED}{exc}")
+                return 1
+
+        async def _run():
+            from b_hunters.platform.api.routers.scans import _build_orchestrator
+
+            async def scan_creator(**kwargs):
+                record = services.scans.create(
+                    {
+                        "name": kwargs.get("name", "benchmark"),
+                        "status": "queued",
+                        "created_by": "cli",
+                        "definition": {
+                            "targets": kwargs.get("targets", []),
+                            "profile": {"name": kwargs.get("profile", "standard")},
+                            "benchmark": True,
+                        },
+                        "scope": {
+                            "authorized_hosts": kwargs.get("authorized_hosts", []),
+                            "allow_private_network": kwargs.get("allow_private_network", True),
+                            "allow_state_changing": kwargs.get("allow_state_changing", False),
+                        },
+                    }
+                )
+                orchestrator = _build_orchestrator(services)
+                from b_hunters.platform.agents.orchestrator import ScanContext, ScanProfile
+
+                context = ScanContext(
+                    scan_id=record.scan_id,
+                    name=record.name,
+                    targets=list(kwargs.get("targets", [])),
+                    authorized_hosts=list(kwargs.get("authorized_hosts", [])),
+                    profile=ScanProfile.from_dict({"name": kwargs.get("profile", "standard")}),
+                    allow_private_network=bool(kwargs.get("allow_private_network", True)),
+                )
+                services.orchestrators[record.scan_id] = orchestrator
+                asyncio.create_task(orchestrator.run(context))
+                return {"scan_id": record.scan_id}
+
+            runner = BenchmarkRunner(database=services.db, lab=lab, scan_creator=scan_creator)
+            return await runner.run(
+                BenchmarkRunConfig(
+                    applications=applications,
+                    provider=args.provider,
+                    profile=args.profile,
+                )
+            )
+
+        try:
+            outcome = asyncio.run(_run())
+        except Exception as exc:
+            logging.error(f"{Fore.RED}The benchmark run failed: {exc}")
+            return 1
+
+        from b_hunters.platform.bench.scoring import summarise_for_humans
+
+        run_id = f"run-{int(time.time() * 1000)}"
+        services.db.collection("platform_benchmark_runs").insert_one(
+            {
+                "run_id": run_id,
+                "benchmark_id": "default",
+                "status": "completed",
+                "started_at": outcome["started_at"],
+                "finished_at": outcome["finished_at"],
+                "summary": outcome["summary"],
+                "started_by": "cli",
+            }
+        )
+        services.db.collection("platform_benchmark_results").insert_many(
+            [dict(result, run_id=run_id) for result in outcome["results"]]
+        )
+        logging.info(f"{Fore.GREEN}{summarise_for_humans(outcome['summary'])}")
+        print(json.dumps(outcome["summary"]["score"], indent=2))
+        return 0
+
+    if args.bench_command == 'scores':
+        runs = list(
+            services.db.collection("platform_benchmark_runs")
+            .find({})
+            .sort("started_at", -1)
+            .limit(20)
+        )
+        if not runs:
+            logging.info(f"{Fore.YELLOW}No benchmark runs have been recorded yet.")
+            return 0
+        from b_hunters.platform.bench.scoring import summarise_for_humans
+
+        for run in runs:
+            logging.info(
+                f"{Fore.CYAN}run {run.get('run_id')} ({run.get('started_at')})"
+            )
+            logging.info(summarise_for_humans(run.get("summary", {})))
+        return 0
+
+    return 1
+
+
 if __name__ == "__main__":
     main()
-
-

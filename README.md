@@ -16,212 +16,197 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
                                             0xBormaa - 2024
 ```
 
-**B-Hunters** is a bug bounty framework built on the [Karton](https://github.com/CERT-Polska/karton) framework. It leverages Docker to execute multiple tools and tasks across different machines, providing a powerful, modular, and scalable approach to reconnaissance and vulnerability scanning.
+**B-Hunters** is an application security assessment platform built on the
+[Karton](https://github.com/CERT-Polska/karton) framework. It runs the
+scanners in isolated containers, adds an AI agent runtime that reasons
+about the results, and exposes everything through an authenticated web
+console.
 
-B-Hunters automates the entire recon process by utilizing multiprocessing and microservices to ensure efficiency, flexibility, and ease of integration.
+The framework automates the reconnaissance and scanning pipeline with
+Karton, Redis, MongoDB and MinIO. The platform layer adds:
 
-Results can be integrated with discord webhooks to be sent once tool running finish or using the command line
-
----
-
-# [B-hunters-playground](https://github.com/B-Hunters/B-Hunters-playground) Includes all tools and servers needed  to start using B-Hunters
-
-## Tools Integrated
-
-B-Hunters currently includes the following tools:
-## Subdomains
-
-1. **[Subfinder](https://github.com/projectdiscovery/subfinder)**
-   A fast passive subdomain enumeration tool that uses a wide range of sources.
-
-2. **[Vita](https://github.com/vita-project/vita)**
-   A tool for vulnerability and information gathering during reconnaissance.
-
-3. **[Findomain](https://github.com/findomain/findomain)**
-   A subdomain enumeration tool that integrates API keys for faster and more extensive discovery.
-
-4. **[Sublist3r](https://github.com/aboul3la/Sublist3r)**
-   A tool designed to enumerate subdomains using multiple search engines.
-
-5. **[Assetfinder](https://github.com/tomnomnom/assetfinder)**
-   Quickly finds domains and subdomains related to a target using various sources.
-
-6. **[Chaos](https://github.com/projectdiscovery/chaos-client)**
-   Fetches subdomains from ProjectDiscovery's Chaos dataset.
+* an **authenticated API and web console** — no scan, finding or
+  administrative function is reachable without a session;
+* an **AI agent runtime** with thirteen specialised roles, a controlled
+  tool interface and an independent verification workflow;
+* **central scope enforcement** that every HTTP-capable code path must
+  pass through;
+* a **vulnerable application laboratory** and a repeatable **benchmark
+  harness** with real precision, recall and F1 scoring.
 
 ---
 
-### Crawling and Spidering
+## Quick start
 
-1. **[Gospider](https://github.com/jaeles-project/gospider)**
-   A fast web spider written in Go, designed for gathering URLs and data.
-
-2. **[Dirsearch](https://github.com/maurosoria/dirsearch)**
-   A simple command-line tool designed to brute force directories and files in webservers.
-
-3. **[GetJS](https://github.com/003random/getJS)**
-   Scrapes JavaScript files from web pages for further analysis.
-
-4. **[Gowitness](https://github.com/sensepost/gowitness)**
-   A tool for taking screenshots of websites, collecting headers, and identifying technologies.
-
-5. **[Katana](https://github.com/projectdiscovery/katana)**
-   A fast and lightweight web crawler built for information gathering.
-
-6. **[ParamSpider](https://github.com/devanshbatham/ParamSpider)**
-   Finds parameters from web pages for use in parameter-based vulnerability testing.
-
-7. **[Waymore](https://github.com/xnl-h4ck3r/waymore)**
-   Fetches URLs from various online services, including Wayback Machine and others.
-
-8. **[Waybackurls](https://github.com/tomnomnom/waybackurls)**
-   Retrieves URLs for a domain from the Wayback Machine and similar services.
-
-9. **[GAU (GetAllURLs)](https://github.com/lc/gau)**
-   Fetches known URLs from AlienVault's Open Threat Exchange, Wayback Machine, and more.
-
-10. **[Wappalyzer-CLI](https://github.com/gokulapap/wappalyzer-cli.git)**
-      Identifies technologies used on websites via the command line.
-
----
-
-### Vulnerability Checks
-
-1. **[DalFox](https://github.com/hahwul/dalfox)**
-   A fast and powerful open-source tool for detecting and exploiting XSS vulnerabilities.
-
-2. **[SSTImap](https://github.com/vladko312/SSTImap)**
-   Detects and maps Server-Side Template Injection (SSTI) vulnerabilities.
-
-3. **[SQLMap](https://github.com/sqlmapproject/sqlmap)**
-   An automated SQL injection and database takeover tool.
-
-4. **[Nuclei](https://github.com/projectdiscovery/nuclei)**
-   A fast tool for vulnerability scanning based on templates.
-
-5. **[SecretFinder](https://github.com/m4ll0k/SecretFinder)**
-   Finds sensitive data in JavaScript files.
-
-6. **[NipeJS](https://github.com/i5nipe/nipejs)**
-   A JavaScript analysis tool for identifying vulnerabilities.
-
----
-### Other
-
-1. **uro**
-2. **gf**
-3. **qsreplace**
-4. **Nmap**
-
----
-## Features
-
-- **Automation**: Automates recon and scanning tasks to save time and reduce manual effort.
-- **Modularity**: Built on a microservices architecture, allowing easy customization and extension.
-- **Scalability**: Handles large-scale tasks with multiprocessing and distributed workloads.
-- **Integration**: Feeds the output of one tool seamlessly into another.
-- **Dockerized**: Provides containerized environments for consistent and isolated tool execution.
-
----
-
-## Why B-Hunters?
-
-B-Hunters uses a microservices architecture to provide these features:
-
-- **Isolation**: Each tool runs in its own container, ensuring no interference between tools.
-- **Resilience**: Faults in one service do not affect others.
-- **Scalability**: Allows horizontal scaling by distributing services across multiple machines.
-- **Flexibility**: Enables you to easily replace or update individual components without disrupting the entire framework.
-- **Parallelism**: Tasks are processed concurrently, significantly reducing recon time.
-
----
-
-## Installation
-
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/B-Hunters/B-Hunters.git
-   cd B-Hunters
-   pip install .
-   ```
-2. **Install Using pip**:
-    ```bash
-    pip install b-hunters
-    ```
-
-## Config
-
-You have first to update **b-hunters.example.ini** file with your **IP** and other configs if you want to edit.
-**Remember when you update settings when running tools use the same config file**
-Config file by default should be in **/etc/b-hunters/b-hunters.ini"** if you want insomething else use **-c** flag when calling command
-
-# Usage
-
-
-The tool provides two main commands: `scan` and `report`. These commands allow you to perform scans on domains and generate reports. Below is a detailed explanation of each command and its options.
-
-## General Options
-
-| Option            | Description                                      | Default                               |
-|--------------------|--------------------------------------------------|---------------------------------------|
-| `--config`, `-c`  | Optional path to the configuration file.          | `/etc/b-hunters/b-hunters.ini`       |
-
----
-
-## Commands
-
-### 1. **Scan Command**
-
-Run a scan operation on a specified domain.
-#### **Options**
-
-| **Option**            | **Description**                                  | **Required** |
-|------------------------|--------------------------------------------------|--------------|
-| `--domain`, `-d`      | Target domain for scanning.                      | Yes          |
-| `--scantype`, `-t`    | Type of scan: `single` or `multi`.               | Yes          |
-| `--description`       | Optional description for the scan.               | No           |
-|
-
-
-#### Usage:
 ```bash
-b-hunters  [-c <config_path>] scan --domain <target_domain> --scantype <single or multi> [--description <description>]
+# 1. The infrastructure.
+cd dev && docker compose -f docker-compose.dev.yml up -d && cd ..
+
+# 2. The platform.
+cd repos/B-Hunters
+pip install -e ".[platform]"
+
+export BHUNTERS_MONGO_URI="mongodb://bhunter:bhunter_dev_pw@127.0.0.1:27017/?authSource=admin"
+export BHUNTERS_MONGO_DB="b-hunters-dev"
+
+# 3. The first administrator.  There is no default credential.
+b-hunters admin bootstrap --username admin
+
+# 4. Run it.
+b-hunters serve --host 127.0.0.1 --port 8080
 ```
-For example to scan all subdomains in example.com
+
+Open <http://127.0.0.1:8080/>.
+
+---
+
+## The legacy commands still work
 
 ```bash
+# Start a scan exactly as before.
 b-hunters scan -d example.com -t multi
-```
-### 2. Report Command
 
-Generate a scan report for a specified domain.
-#### **Options**
-
-| **Option**            | **Description**                                  | **Required** |
-|------------------------|--------------------------------------------------|--------------|
-| `--domain`, `-d`      | Specify the domain for the report.               | Yes          |
-| `--output`, `-o`      | Optional path to save the report output.         | No           |
-|
-#### **Usage**
-```bash
-b-hunters report --domain <target_domain> [--output <output_path>]
-```
-
-Example to get report of domain example.com
-```bash
+# Produce the report directory exactly as before.
 b-hunters report -d example.com -o /tmp/example.com
+
+# Inspect the Karton queues.
+b-hunters status
 ```
-# Future Plan
 
-Here are the planned features and improvements for the tool:
+The existing `scans`, `domains`, `reports` and `js` MongoDB collections
+are untouched, and the 17 scanner workers keep their Karton identities,
+filters and payload keys.
 
--  **Create Web Interface**
-  Develop a user-friendly web interface to manage scans and reports.
+---
 
--  **Integrate Discord Bot**
-  Integrate a Discord bot to scan or get full report.
+## New commands
 
-- **Add More Tools**
-  Continuously expand the toolset by adding more scanning and vulnerability scanning tools.
+| Command | Purpose |
+|---|---|
+| `b-hunters serve` | Run the authenticated API and the web console |
+| `b-hunters admin bootstrap` | Create the first administrator |
+| `b-hunters admin add-user` | Create a user |
+| `b-hunters admin list-users` | List the users |
+| `b-hunters admin init-db` | Create the database indexes |
+| `b-hunters admin seed-roles` | Seed the built-in agent definitions |
+| `b-hunters bench sync` | Load the benchmark manifests |
+| `b-hunters bench lab up\|down\|status` | Manage the vulnerable application laboratory |
+| `b-hunters bench run` | Run the benchmark suite |
+| `b-hunters bench scores` | Show the recorded benchmark scores |
 
-[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/bormaa)
+---
+
+## The agent runtime
+
+Thirteen roles, each with its own instructions, tools, permissions,
+output schema and budget:
+
+| Role | Purpose |
+|---|---|
+| `orchestrator` | Builds the plan, assigns work, tracks evidence, stops on budget |
+| `recon` | Maps hosts, services, technologies, routes and endpoints |
+| `javascript` | Recovers routes, API paths, methods, parameters and auth logic from JavaScript |
+| `api` | Correlates routes into an API surface; finds undocumented endpoints |
+| `authn` | Traces registration, login, logout, reset and session handling |
+| `access_control` | Compares permitted and forbidden operations across test identities |
+| `vuln_injection` | Bounded, non-destructive injection probes |
+| `vuln_xss` | Inert-marker XSS sink analysis |
+| `vuln_ssrf` | Controlled-callback SSRF and path traversal analysis |
+| `vuln_config` | Security headers, TLS, cookies and configuration defaults |
+| `source_analysis` | Correlates source, configuration and build artefacts with HTTP behaviour |
+| `verifier` | Independently re-evaluates candidate findings and rejects the weak ones |
+| `adjudicator` | Reconciles disagreement, deduplicates, sets severity, writes the report |
+
+Agents exchange **structured messages**, not chat. A finding proposed by
+an agent is created as `unverified`; only the verifier can promote it, and
+only from evidence. Agreement between agents is never treated as proof.
+
+The model layer speaks the OpenAI `chat/completions` contract over plain
+HTTP. Native tool calling is probed at runtime; an endpoint without it
+falls back to a compatibility layer that validates the requested action
+against the same schema and the same permission checks.
+
+---
+
+## Scope enforcement
+
+Scope is enforced in code, not in a prompt. Every HTTP-capable tool,
+browser action, agent request and worker request passes through
+`b_hunters/platform/security/scope.py`, which:
+
+* refuses any host outside the operator's explicit allow-list, and never
+  widens it as hosts are discovered;
+* validates **every resolved IP address**, so a DNS record that flips to
+  `127.0.0.1` cannot reach a loopback service;
+* blocks loopback, private, link-local, CGNAT, multicast and cloud
+  metadata destinations;
+* re-validates every redirect hop;
+* bounds request rates, concurrency, response size and total duration;
+* requires an explicit policy flag for state-changing methods.
+
+See `docs/threat-model.md`.
+
+---
+
+## Tools integrated
+
+The 17 existing B-Hunters workers are registered as scanner adapters with
+their real Karton task contracts. Six capabilities that the existing
+modules did not cover at all are added as in-process adapters: security
+header assessment, TLS configuration, secret detection with redaction,
+OpenAPI discovery, GraphQL analysis and dependency analysis.
+
+See `docs/architecture-audit.md` for the full inventory, the dependency
+graph and the compatibility matrix.
+
+---
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| `docs/architecture-audit.md` | The audit of all 19 repositories, the inventory, the gaps and the migration plan |
+| `docs/threat-model.md` | Assets, trust boundaries, threats, mitigations and residual risk |
+| `docs/configuration.md` | Every environment variable, the INI file, providers, profiles and agent definitions |
+| `docs/deployment.md` | Development and production deployment, health checks, backup, retention and the runbook |
+| `docs/benchmark.md` | The laboratory, the manifests, the scoring and how to reproduce a run |
+| `docs/agent-authoring.md` | How to write, version and test an agent |
+
+---
+
+## Development
+
+```bash
+pip install -e ".[platform,dev]"
+
+# The unit and security tests need no services.
+pytest tests/unit tests/security -q
+
+# The full suite needs MongoDB.
+export BHUNTERS_TEST_MONGO_URI="mongodb://bhunter:bhunter_dev_pw@127.0.0.1:27017/?authSource=admin"
+pytest tests -q
+
+# Linting and formatting.
+ruff check b_hunters tests
+ruff format --check b_hunters tests
+```
+
+CI runs the lint, the type check, the unit and security tests, the
+integration tests against a real MongoDB, the package build, a secret
+scan and a container vulnerability scan.
+
+---
+
+## B-Hunters-Playground
+
+[B-Hunters-Playground](https://github.com/B-Hunters/B-Hunters-Playground)
+contains the original Compose deployment of the scanner workers. It is
+still useful for running the workers on their own; the platform
+deployment is documented in `docs/deployment.md`.
+
+---
+
+## License
+
+BSD. The bundled tools carry their own licences; see the inventory in
+`docs/architecture-audit.md`.

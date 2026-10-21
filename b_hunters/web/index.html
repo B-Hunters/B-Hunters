@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>B-Hunters Platform</title>
+<link rel="stylesheet" href="/static/styles.css">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<!-- ------------------------------------------------------------- login -->
+<div class="login-shell" id="login-shell">
+  <form class="login-card" id="login-form" autocomplete="on">
+    <div class="brand">
+      <div class="mark">BH</div>
+      <div>
+        <div class="name">B-Hunters</div>
+        <div class="tag">Application Security Platform</div>
+      </div>
+    </div>
+    <h1>Sign in</h1>
+    <p class="sub">Authorised assessments only. Sessions are logged to the audit trail.</p>
+    <div id="login-error" class="alert error hidden"></div>
+    <div class="field">
+      <label for="login-username">Username</label>
+      <input type="text" id="login-username" name="username" autocomplete="username" required autofocus>
+    </div>
+    <div class="field">
+      <label for="login-password">Password</label>
+      <input type="password" id="login-password" name="password" autocomplete="current-password" required>
+    </div>
+    <button class="btn primary" type="submit" id="login-submit" style="width:100%;justify-content:center">Sign in</button>
+  </form>
+</div>
+
+<!-- --------------------------------------------------------------- app -->
+<div class="app" id="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="mark">BH</div>
+      <div>
+        <div class="name">B-Hunters</div>
+        <div class="tag">Security Platform</div>
+      </div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">Operations</div>
+      <a class="nav-link" data-route="dashboard"><span class="glyph">◈</span> Overview</a>
+      <a class="nav-link" data-route="scans"><span class="glyph">▤</span> Scans</a>
+      <a class="nav-link" data-route="new-scan"><span class="glyph">＋</span> New scan</a>
+      <a class="nav-link" data-route="findings"><span class="glyph">⚑</span> Findings</a>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">Intelligence</div>
+      <a class="nav-link" data-route="agents"><span class="glyph">◉</span> Agent workspace</a>
+      <a class="nav-link" data-route="karton"><span class="glyph">⛁</span> Karton &amp; workers</a>
+      <a class="nav-link" data-route="benchmarks"><span class="glyph">⚗</span> Benchmarks</a>
+    </div>
+
+    <div class="nav-group" id="admin-nav" style="display:none">
+      <div class="nav-group-title">Administration</div>
+      <a class="nav-link" data-route="users"><span class="glyph">☖</span> Users</a>
+      <a class="nav-link" data-route="providers"><span class="glyph">◇</span> Model providers</a>
+      <a class="nav-link" data-route="agent-defs"><span class="glyph">☰</span> Agent definitions</a>
+      <a class="nav-link" data-route="audit"><span class="glyph">☷</span> Audit log</a>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="user-chip">
+        <div class="avatar" id="user-avatar">?</div>
+        <div class="who">
+          <div class="u" id="user-name">-</div>
+          <div class="r" id="user-role">-</div>
+        </div>
+      </div>
+      <button class="btn ghost small" id="logout-btn" style="width:100%;justify-content:center">Sign out</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="page-title">Overview</h1>
+        <div class="crumb" id="page-crumb"></div>
+      </div>
+      <div class="topbar-actions">
+        <span class="row small faint" id="live-indicator" style="display:none">
+          <span class="conn-dot" id="live-dot"></span><span id="live-text">connecting</span>
+        </span>
+        <button class="btn small" id="refresh-btn">Refresh</button>
+      </div>
+    </header>
+    <main class="content" id="view"></main>
+  </div>
+</div>
+
+<div class="toast-host" id="toasts"></div>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
