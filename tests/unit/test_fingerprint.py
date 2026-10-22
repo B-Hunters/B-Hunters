@@ -11,9 +11,8 @@ import pytest
 
 from b_hunters.platform.scanners.fingerprint import (
     CONFIDENCE_CERTAIN,
-    CONFIDENCE_HIGH,
-    Service,
     VERSION_PATTERN,
+    Service,
     detect_from_body,
     detect_from_cookies,
     detect_from_favicon,
