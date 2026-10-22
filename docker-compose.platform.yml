@@ -232,6 +232,47 @@ services:
     networks:
       - bhunter
 
+  # --- the vulnerable application laboratory -----------------------------
+  # These are started with `--profile lab`; they are deliberately not part
+  # of the default stack, and they are published on the loopback interface
+  # only.
+  lab-dvga:
+    image: dolevf/dvga:2.2.0
+    container_name: bhunter_lab_dvga
+    profiles: ["lab"]
+    restart: "no"
+    environment:
+      WEB_HOST: "0.0.0.0"
+    ports:
+      - "127.0.0.1:5013:5013"
+    networks:
+      - bhunter
+
+  lab-juice-shop:
+    image: bkimminich/juice-shop:latest
+    container_name: bhunter_lab_juice_shop
+    profiles: ["lab"]
+    restart: "no"
+    environment:
+      # The Node.js heap has to be large enough for the search index the
+      # application builds at start-up.
+      NODE_OPTIONS: "--max-old-space-size=3072"
+    ports:
+      - "127.0.0.1:3300:3000"
+    mem_limit: 4g
+    networks:
+      - bhunter
+
+  lab-webgoat:
+    image: webgoat/webgoat:latest
+    container_name: bhunter_lab_webgoat
+    profiles: ["lab"]
+    restart: "no"
+    ports:
+      - "127.0.0.1:8081:8080"
+    networks:
+      - bhunter
+
 volumes:
   mongo_data:
   redis_data:
