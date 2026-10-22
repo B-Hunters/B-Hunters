@@ -1,0 +1,245 @@
+# The B-Hunters platform on the tailnet.
+#
+# The platform is reachable at http://bhunter.<tailnet>.ts.net:8080 from
+# every device on the tailnet, and is not published on the host's public
+# interfaces.
+#
+# The Tailscale sidecar is the tailnet node: the platform shares its
+# network namespace, so the platform *is* the node named "bhunter".
+#
+#   docker compose --env-file ../.env -f docker-compose.platform.yml up -d
+#
+# The scanner worker images are built separately:
+#
+#   for w in nuclei katana dalfox sqlmap nmap; do
+#     docker build -q -t b-hunters-local/$w:1.2.0 ../repos/B-Hunters-${w^}
+#   done
+
+x-tailscale: &tailscale
+  image: tailscale/tailscale:latest
+  restart: unless-stopped
+  cap_add:
+    - NET_ADMIN
+    - SYS_MODULE
+  environment:
+    - TS_AUTHKEY=${TS_AUTHKEY}
+    - TS_STATE_DIR=/var/lib/tailscale
+    - TS_USERSPACE=false
+    - TS_ACCEPT_DNS=true
+  volumes:
+    - /dev/net/tun:/dev/net/tun
+
+services:
+  # --- the tailnet node ------------------------------------------------
+  tailscale-bhunter:
+    <<: *tailscale
+    container_name: bhunter_ts
+    hostname: ${BHUNTER_TS_HOSTNAME:-bhunter}
+    volumes:
+      - ts_bhunter_data:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      - bhunter
+
+  # --- the platform: the API, the web console and the agent runtime ----
+  platform:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: b-hunters-platform:1.2.0
+    container_name: bhunter_platform
+    # Share the tailnet node's network namespace, so the platform is the
+    # node named "bhunter" and is reachable over the tailnet.
+    network_mode: service:tailscale-bhunter
+    depends_on:
+      - tailscale-bhunter
+      - mongo
+      - redis
+      - s3
+    restart: unless-stopped
+    environment:
+      - BHUNTERS_HOST=0.0.0.0
+      - BHUNTERS_PORT=8080
+      - BHUNTERS_MONGO_URI=mongodb://bhunter:bhunter_dev_pw@mongo:27017/?authSource=admin
+      - BHUNTERS_MONGO_DB=b-hunters
+      - BHUNTERS_KARTON_CONFIG_PATH=/etc/b-hunters/b-hunters.ini
+      - BHUNTERS_AGENT_WORKSPACE_ROOT=/var/lib/b-hunters/workspaces
+      - BHUNTERS_SESSION_COOKIE_SECURE=false
+      - BHUNTERS_CORS_ORIGINS=
+    volumes:
+      # The platform names a Karton identity; the workers do not.
+      - ./deploy/platform.ini:/etc/b-hunters/b-hunters.ini:ro
+      - workspaces:/var/lib/b-hunters
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/readyz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # --- the data stores -------------------------------------------------
+  mongo:
+    image: mongo:7.0.16
+    container_name: bhunter_mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: bhunter
+      MONGO_INITDB_ROOT_PASSWORD: bhunter_dev_pw
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - bhunter
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand(\"ping\").ok'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7.2.5-alpine
+    container_name: bhunter_redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --requirepass
+      - bhunter_dev_pw
+      - --appendonly
+      - "yes"
+    volumes:
+      - redis_data:/data
+    networks:
+      - bhunter
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a bhunter_dev_pw ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+
+  s3:
+    image: rustfs/rustfs:latest
+    container_name: bhunter_s3
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: bhunter
+      RUSTFS_SECRET_KEY: bhunter_dev_secret
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+    volumes:
+      - s3_data:/data
+    networks:
+      - bhunter
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  # --- the task router --------------------------------------------------
+  karton-system:
+    image: certpl/karton-system:v5.5.0
+    container_name: bhunter_karton
+    restart: unless-stopped
+    entrypoint: karton-system
+    command: --setup-bucket
+    volumes:
+      - ./deploy/platform.ini:/etc/karton/karton.ini:ro
+    depends_on:
+      - redis
+      - s3
+    networks:
+      - bhunter
+
+  # --- the scanner workers -----------------------------------------------
+  # Every worker reads the same configuration and registers under its own
+  # Karton identity.
+  worker-nuclei:
+    image: b-hunters-local/nuclei:1.2.0
+    container_name: bhunter_worker_nuclei
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      - bhunter
+
+  worker-katana:
+    image: b-hunters-local/katana:1.2.0
+    container_name: bhunter_worker_katana
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      - bhunter
+
+  worker-nmap:
+    image: b-hunters-local/nmap:1.2.0
+    container_name: bhunter_worker_nmap
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      - bhunter
+
+  worker-sqlmap:
+    image: b-hunters-local/sqlmap:1.2.0
+    container_name: bhunter_worker_sqlmap
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      - bhunter
+
+  worker-dalfox:
+    image: b-hunters-local/dalfox:1.2.0
+    container_name: bhunter_worker_dalfox
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      - bhunter
+
+  worker-webtechnology:
+    image: b-hunters-local/webtechnology:1.2.0
+    container_name: bhunter_worker_webtechnology
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      - bhunter
+
+volumes:
+  mongo_data:
+  redis_data:
+  s3_data:
+  ts_bhunter_data:
+  workspaces:
+
+networks:
+  bhunter:
+    name: bhunter
+    driver: bridge

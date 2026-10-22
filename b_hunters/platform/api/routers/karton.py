@@ -38,6 +38,18 @@ def _karton_state(services: Services):
     return KartonState(producer.backend), producer
 
 
+def _safe_last_update(queue: Any) -> float:
+    """The last update of a queue, or zero when it has seen no task.
+
+    Karton's accessor raises ``ValueError`` on an empty task list, which
+    would turn a queue that has simply not been used into a 500.
+    """
+    try:
+        return float(queue.last_update)
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def _queue_snapshot(name: str, queue: Any, now: float) -> dict[str, Any]:
     pending = list(queue.pending_tasks)
     started = [task for task in pending if "started" in str(task.status).lower()]
@@ -50,7 +62,9 @@ def _queue_snapshot(name: str, queue: Any, now: float) -> dict[str, Any]:
         "started_tasks": len(started),
         "crashed_tasks": len(crashed),
         "oldest_task_age_seconds": round(max(ages), 2) if ages else 0.0,
-        "last_update": queue.last_update,
+        # A queue that has not seen a task yet has no last update; the
+        # upstream accessor raises on an empty task list.
+        "last_update": _safe_last_update(queue),
         "pending": [
             {
                 "uid": task.uid,
