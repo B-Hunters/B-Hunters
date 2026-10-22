@@ -821,14 +821,74 @@ def _bench(args):
         async def _run():
             from b_hunters.platform.api.routers.scans import _build_orchestrator
 
+            # The real worker stack, when one is reachable.
+            worker_collector = None
+            worker_runner = _build_worker_runner(services)
+            if worker_runner is not None:
+                def collect(**kwargs):
+                    return worker_runner.run(**kwargs)
+
+                worker_collector = collect
+
             async def scan_creator(**kwargs):
+                from bson import ObjectId
+
+                targets = kwargs.get("targets", [])
+                target = targets[0] if targets else ""
+                # The host *with* the port: the subdomain payload and the
+                # Domain field have to be the same string, or a worker that
+                # derives the status from the URL writes to a document that
+                # does not exist.
+                host = target.split("://", 1)[-1].split("/", 1)[0]
+
+                # The legacy documents the scanner workers write into,
+                # exactly as subrecon creates them.  The legacy scan
+                # identifier is also the platform's scan identifier, so the
+                # orchestrator, the workers and the benchmark all
+                # correlate on one value.
+                legacy = services.db
+                scan_oid = ObjectId()
+                report_oid = ObjectId()
+                legacy.collection("scans").insert_one(
+                    {
+                        "_id": scan_oid,
+                        "Domain": host,
+                        "Type": "single",
+                        "Description": "benchmark run",
+                    }
+                )
+                legacy.collection("reports").insert_one(
+                    {
+                        "_id": report_oid,
+                        "Domain": host,
+                        "Ports": [],
+                        "Technology": {},
+                        "Vulns": {},
+                        "Paths": [],
+                        "Paths403": [],
+                        "Screenshot": "",
+                        "data": {},
+                    }
+                )
+                legacy.collection("domains").insert_one(
+                    {
+                        "Scanid": str(scan_oid),
+                        "Domain": host,
+                        "report_id": report_oid,
+                        "resolve": True,
+                        "active": True,
+                        "status": {"processing": [], "finished": [], "failed": []},
+                    }
+                )
+
                 record = services.scans.create(
                     {
+                        "scan_id": str(scan_oid),
                         "name": kwargs.get("name", "benchmark"),
                         "status": "queued",
                         "created_by": "cli",
                         "definition": {
-                            "targets": kwargs.get("targets", []),
+                            "targets": targets,
                             "profile": {"name": kwargs.get("profile", "standard")},
                             "benchmark": True,
                         },
@@ -843,18 +903,23 @@ def _bench(args):
                 from b_hunters.platform.agents.orchestrator import ScanContext, ScanProfile
 
                 context = ScanContext(
-                    scan_id=record.scan_id,
+                    scan_id=str(scan_oid),
                     name=record.name,
                     targets=list(kwargs.get("targets", [])),
                     authorized_hosts=list(kwargs.get("authorized_hosts", [])),
                     profile=ScanProfile.from_dict({"name": kwargs.get("profile", "standard")}),
                     allow_private_network=bool(kwargs.get("allow_private_network", True)),
                 )
-                services.orchestrators[record.scan_id] = orchestrator
+                services.orchestrators[str(scan_oid)] = orchestrator
                 asyncio.create_task(orchestrator.run(context))
-                return {"scan_id": record.scan_id}
+                return {"scan_id": str(scan_oid), "report_id": report_oid}
 
-            runner = BenchmarkRunner(database=services.db, lab=lab, scan_creator=scan_creator)
+            runner = BenchmarkRunner(
+                database=services.db,
+                lab=lab,
+                scan_creator=scan_creator,
+                worker_collector=worker_collector,
+            )
             return await runner.run(
                 BenchmarkRunConfig(
                     applications=applications,
@@ -955,6 +1020,36 @@ def _contracts(args):
     if not findings:
         logging.info(f"{Fore.GREEN}Every worker agrees on the message contract.")
     return 0
+
+
+
+
+def _build_worker_runner(services):
+    """Build the Karton worker collector, when the stack is reachable.
+
+    The benchmark drives the workers that run as containers: the producer
+    publishes the tasks, the workers pick them up and write their results
+    into the report document, and the collector reads them back.
+    """
+    import os
+
+    from karton.core import Config, Producer
+
+    from b_hunters.platform.bench.workers import KartonWorkerRunner
+
+    config_path = os.environ.get("BHUNTERS_HOST_CONFIG")
+    if not config_path or not os.path.exists(config_path):
+        return None
+    try:
+        producer = Producer(config=Config(path=config_path), identity="B-Hunters-Bench")
+    except Exception as exc:
+        logging.info(f"{Fore.YELLOW}The worker stack is not reachable: {exc}")
+        return None
+    return KartonWorkerRunner(
+        producer=producer,
+        mongo_database=services.db,
+        wait_seconds=int(os.environ.get("BHUNTERS_BENCH_WORKER_WAIT", "240")),
+    )
 
 
 if __name__ == "__main__":

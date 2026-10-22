@@ -157,9 +157,59 @@ async def start_run(
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     async def scan_creator(**kwargs: Any) -> dict[str, Any]:
+        from bson import ObjectId
+
         services_container = services
+        targets = kwargs.get("targets", [])
+        target = targets[0] if targets else ""
+        # The host *with* the port: the subdomain payload and the Domain
+        # field have to be the same string, or a worker that derives the
+        # status from the URL writes to a document that does not exist.
+        host = target.split("://", 1)[-1].split("/", 1)[0]
+
+        # The legacy documents the scanner workers write into, exactly as
+        # subrecon creates them.  The legacy scan identifier is also the
+        # platform's scan identifier, so the orchestrator, the workers and
+        # the benchmark all correlate on one value.
+        legacy = services.db
+        scan_oid = ObjectId()
+        report_oid = ObjectId()
+        legacy.collection("scans").insert_one(
+            {
+                "_id": scan_oid,
+                "Domain": host,
+                "Type": "single",
+                "Description": "benchmark run",
+            }
+        )
+        legacy.collection("reports").insert_one(
+            {
+                "_id": report_oid,
+                "Domain": host,
+                "Ports": [],
+                "Technology": {},
+                "Vulns": {},
+                "Paths": [],
+                "Paths403": [],
+                "Screenshot": "",
+                "data": {},
+            }
+        )
+        legacy.collection("domains").insert_one(
+            {
+                "Scanid": str(scan_oid),
+                "Domain": host,
+                "report_id": report_oid,
+                "resolve": True,
+                "active": True,
+                "status": {"processing": [], "finished": [], "failed": []},
+            }
+        )
+
+        # The platform's own record of the same scan.
         record = services_container.scans.create(
             {
+                "scan_id": str(scan_oid),
                 "name": kwargs.get("name", "benchmark"),
                 "status": "queued",
                 "created_by": kwargs.get("created_by", user.username),
@@ -175,7 +225,11 @@ async def start_run(
                 },
             }
         )
-        return {"scan_id": record.scan_id}
+        return {
+            "scan_id": str(scan_oid),
+            "report_id": report_oid,
+            "platform_scan_id": record.scan_id,
+        }
 
     runner = BenchmarkRunner(database=services.db, lab=manager, scan_creator=scan_creator)
     config = BenchmarkRunConfig(

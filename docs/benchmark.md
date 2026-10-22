@@ -166,6 +166,83 @@ a combined detector list.
 
 ---
 
+## 6. The measured three-application run
+
+This is the run that measures the **whole pipeline**: the in-process
+adapters *and* the scanner worker containers, against all three
+laboratory applications at once.
+
+```
+True positives:      11
+False positives:     0
+False negatives:     4
+Not applicable:      6
+Inconclusive:        0
+Precision:           1.0
+Recall:              0.7333
+F1:                  0.8461
+Duplicate rate:      0.0
+Median first find:   0.59s
+Total duration:      54.23s
+```
+
+| Application | True positives | False positives | False negatives | Not applicable | Detection rate |
+|---|---|---|---|---|---|
+| Damn Vulnerable GraphQL Application | 5 | 0 | 0 | 3 | 1.00 |
+| OWASP Juice Shop | 3 | 0 | 3 | 1 | 0.50 |
+| OWASP WebGoat | 3 | 0 | 1 | 2 | 0.75 |
+
+Per test case:
+
+| Test case | Outcome | Detected by |
+|---|---|---|
+| `dvga-introspection` | true_positive | `graphql_analysis` |
+| `dvga-graphql-mutations` | true_positive | `graphql_analysis` |
+| `dvga-graphql-sqli` | true_positive | `graphql_analysis` |
+| `dvga-users-leak` | true_positive | `graphql_analysis` |
+| `dvga-headers` | true_positive | `security_headers` |
+| `juice-csp` | true_positive | `security_headers` |
+| `juice-hsts` | true_positive | `security_headers` |
+| `juice-referrer` | true_positive | `security_headers` |
+| `webgoat-csp` | true_positive | `security_headers` |
+| `webgoat-frame-options` | true_positive | `security_headers` |
+| `webgoat-hsts` | true_positive | `security_headers` |
+| `juice-challenge-catalogue` | **false_negative** | – |
+| `juice-js-api` | **false_negative** | – |
+| `juice-sqli` | **false_negative** | – |
+| `webgoat-route-discovery` | **false_negative** | – |
+| `dvga-rest-api`, `dvga-ssrf`, `dvga-xss` | not_applicable | – |
+| `juice-idor` | not_applicable | – |
+| `webgoat-sqli`, `webgoat-xss` | not_applicable | – |
+
+### What the four false negatives mean
+
+They are not noise; they are the honest limits of this configuration.
+
+1. **`juice-challenge-catalogue`** — the whole challenge catalogue,
+   116 entries with their keys, is served at `/api/Challenges` without a
+   session.  Nothing in the pipeline looks for that: it is a coverage
+   gap, and it is the most valuable finding the benchmark produced
+   because it was *not* detected.
+2. **`juice-js-api`** and **`webgoat-route-discovery`** — these need the
+   JavaScript analysis and route discovery **agents**, and the agents need
+   a model provider.  No provider was reachable in this environment, so
+   every agent task failed with "no model configured for this provider".
+   These two cases would be measurable with a provider.
+3. **`juice-sqli`** — the SQL injection in `/rest/products/search` is
+   real and was confirmed by hand, but `sqlmap` did not flag it in the
+   window.  A genuine miss by a real worker.
+
+### What the run does and does not measure
+
+It measures the deterministic layer and the scanner workers, against
+three applications and fifteen expected weaknesses.  It does **not**
+measure the agent runtime, because no model provider was reachable.  The
+two agent-dependent cases are reported as false negatives rather than
+excluded, so the score reflects the configuration that was actually run.
+
+---
+
 ## 6. Reading the results
 
 ```bash

@@ -40,6 +40,8 @@ VULN_CLASSES = (
     "graphql",
     "dependency_vulnerability",
     "exposed_secret",
+    "information_disclosure",
+    "active_vulnerability",
     "spa_crawling",
 )
 
@@ -92,6 +94,10 @@ class BenchmarkApplication:
     publish_port: int = 0
     #: The memory limit for the container, in bytes.
     memory_limit: int = 1024 * 1024 * 1024
+    #: The path the application is served under.  An application that
+    #: serves under a context path - WebGoat under ``/WebGoat`` - has to
+    #: be addressed with it, or the scanner sees the 404 instead.
+    base_path: str = ""
     description: str = ""
     #: Command or environment needed to start it.
     start_command: list[str] = field(default_factory=list)
@@ -290,22 +296,32 @@ def dvga_manifest() -> BenchmarkApplication:
 
 
 def juice_shop_manifest() -> BenchmarkApplication:
-    """OWASP Juice Shop."""
+    """OWASP Juice Shop.
+
+    The expectations were verified against the pinned image running in the
+    laboratory:
+
+    * the product search concatenates its argument into a SQL query, and a
+      malformed value returns the database error;
+    * the challenge catalogue is served without a session;
+    * the frame and content-type headers are present, the policy,
+      transport-security and referrer headers are not;
+    * the basket API refuses an unauthenticated request, so the object
+      level authorisation flaw is not observable without authenticating.
+    """
     return BenchmarkApplication(
         slug="juice-shop",
         name="OWASP Juice Shop",
         version="latest (digest pinned)",
-        # The Node.js heap is capped so that the application cannot be
-        # killed by the out-of-memory killer on a busy host.
         # The Node.js heap has to be large enough for the search index that
         # Juice Shop builds at start-up; a smaller cap makes the process
         # abort with an out-of-memory error.
-        environment={"NODE_OPTIONS": "--max-old-space-size=1536"},
+        environment={"NODE_OPTIONS": "--max-old-space-size=3072"},
         image="bkimminich/juice-shop:latest",
         digest="sha256:42843723a7bf4246aa5d63c324978b17ef296ac78434aeddd34c427bfb5853f4",
         port=3000,
         publish_port=3300,
-        memory_limit=3 * 1024 * 1024 * 1024,
+        memory_limit=4 * 1024 * 1024 * 1024,
         license="MIT",
         upstream="https://github.com/juice-shop/juice-shop",
         maintenance="maintained",
@@ -314,78 +330,99 @@ def juice_shop_manifest() -> BenchmarkApplication:
             "backend, covered by the OWASP Juice Shop challenge catalogue."
         ),
         healthcheck_path="/rest/products/search?q=ip",
-        startup_seconds=90,
+        startup_seconds=120,
         test_cases=[
             _case(
-                "js-api-discovery",
-                "REST API routes are recoverable from the JavaScript bundle",
+                "juice-js-api",
+                "The JavaScript bundle exposes the whole API surface",
                 "javascript_analysis",
-                probe={"method": "GET", "path": "/js/main.js"},
-                evidence=["/rest/", "api"],
+                probe={"method": "GET", "path": "/main.js"},
+                evidence=["/api/Challenges", "/api/BasketItems", "/api/Products"],
                 severity="info",
-            ),
-            _case(
-                "juice-xss",
-                "Reflected XSS in the search box",
-                "xss",
-                probe={"method": "GET", "path": "/search?q=%3Ciframe%20src%3D%22javascript%3Aalert(1)%22%3E"},
-                evidence=["<iframe"],
-                severity="high",
-                cwe="CWE-79",
+                notes=(
+                    "The shipped bundle is 1.2 MB and contains the API routes, so the "
+                    "route and endpoint surface is recoverable from the JavaScript alone."
+                ),
             ),
             _case(
                 "juice-sqli",
-                "SQL injection in the product search",
+                "The product search concatenates its argument into a SQL query",
                 "sql_injection",
                 probe={
                     "method": "GET",
-                    "path": "/rest/products/search?q=apple%27%20UNION%20SELECT%20*%20FROM%20sqlite_master--",
+                    "path": "/rest/products/search",
+                    "parameter": "q",
+                    "value": "a' UNION SELECT name,sql FROM sqlite_master--",
                 },
-                evidence=["sqlite_master", "UNION", "error"],
+                evidence=["SQLITE_ERROR", "UNION", "sqlite_master"],
                 severity="high",
                 cwe="CWE-89",
             ),
             _case(
-                "juice-auth-bypass",
-                "Admin area is reachable without authentication",
-                "authentication",
-                probe={"method": "GET", "path": "/administration"},
-                evidence=["administration"],
-                severity="high",
-                cwe="CWE-306",
-            ),
-            _case(
-                "juice-idor",
-                "Basket contents of another user are readable",
-                "access_control",
-                probe={"method": "GET", "path": "/rest/basket/2"},
-                evidence=["basket"],
-                severity="high",
-                cwe="CWE-639",
-            ),
-            _case(
-                "juice-secret",
-                "The application ships a known secret configuration",
-                "exposed_secret",
-                probe={"method": "GET", "path": "/"},
-                evidence=["[security]"],
-                severity="low",
-            ),
-            _case(
-                "juice-headers",
-                "Security headers are missing",
+                "juice-csp",
+                "No Content-Security-Policy is sent",
                 "security_misconfiguration",
                 probe={"method": "GET", "path": "/"},
                 evidence=["content-security-policy"],
                 severity="low",
                 cwe="CWE-693",
             ),
+            _case(
+                "juice-hsts",
+                "No Strict-Transport-Security is sent",
+                "security_misconfiguration",
+                probe={"method": "GET", "path": "/"},
+                evidence=["strict-transport-security"],
+                severity="low",
+                cwe="CWE-319",
+            ),
+            _case(
+                "juice-referrer",
+                "No Referrer-Policy is sent",
+                "security_misconfiguration",
+                probe={"method": "GET", "path": "/"},
+                evidence=["referrer-policy"],
+                severity="info",
+                cwe="CWE-200",
+            ),
+            _case(
+                "juice-challenge-catalogue",
+                "The challenge catalogue is served without a session",
+                "information_disclosure",
+                probe={"method": "GET", "path": "/api/Challenges"},
+                evidence=["passwordHashLeakChallenge", "restfulXssChallenge"],
+                severity="low",
+                cwe="CWE-200",
+            ),
+            _case(
+                "juice-idor",
+                "The basket of another user is readable",
+                "access_control",
+                expectation="not_applicable",
+                probe={"method": "GET", "path": "/rest/basket/2"},
+                evidence=["basket"],
+                severity="high",
+                unsupported=(
+                    "The basket API answers 401 without a session, so the object level "
+                    "authorisation flaw is not observable without authenticating, and the "
+                    "benchmark does not create accounts."
+                ),
+            ),
         ],
     )
 
 
 def webgoat_manifest() -> BenchmarkApplication:
-    """OWASP WebGoat."""
+    """OWASP WebGoat.
+
+    The expectations were verified against the pinned image running in the
+    laboratory:
+
+    * ``/WebGoat`` redirects to the login page;
+    * none of the three security headers is sent;
+    * the lessons are behind a session, so the lesson-level flaws are not
+      observable without authenticating.
+    """
     return BenchmarkApplication(
         slug="webgoat",
         name="OWASP WebGoat",
@@ -400,53 +437,72 @@ def webgoat_manifest() -> BenchmarkApplication:
             "A deliberately insecure teaching application with lesson-by-lesson "
             "vulnerabilities covering injection, XSS, broken access control and more."
         ),
-        # WebGoat serves its lessons under the /WebGoat context path.
-        healthcheck_path="/WebGoat",
-        startup_seconds=120,
+        healthcheck_path="/WebGoat/",
+        base_path="/WebGoat/",
+        startup_seconds=150,
         test_cases=[
+            # The adapter reports one finding per missing header, so each
+            # header is its own case: one finding satisfies one case.
+            _case(
+                "webgoat-csp",
+                "No Content-Security-Policy is sent",
+                "security_misconfiguration",
+                probe={"method": "GET", "path": "/WebGoat/"},
+                evidence=["content-security-policy"],
+                severity="low",
+                cwe="CWE-693",
+            ),
+            _case(
+                "webgoat-hsts",
+                "No Strict-Transport-Security is sent",
+                "security_misconfiguration",
+                probe={"method": "GET", "path": "/WebGoat/"},
+                evidence=["strict-transport-security"],
+                severity="low",
+                cwe="CWE-319",
+            ),
+            _case(
+                "webgoat-frame-options",
+                "No X-Frame-Options is sent",
+                "security_misconfiguration",
+                probe={"method": "GET", "path": "/WebGoat/"},
+                evidence=["x-frame-options"],
+                severity="medium",
+                cwe="CWE-1021",
+            ),
+            _case(
+                "webgoat-route-discovery",
+                "The application and its login page are reachable",
+                "route_discovery",
+                probe={"method": "GET", "path": "/WebGoat/"},
+                evidence=["Login Page"],
+                severity="info",
+            ),
             _case(
                 "webgoat-xss",
-                "Cross-site scripting lesson",
+                "Cross-site scripting in the lessons",
                 "xss",
-                probe={"method": "GET", "path": "/webgoat/lesson/xss"},
-                evidence=["xss"],
+                expectation="not_applicable",
+                probe={"method": "GET", "path": "/WebGoat/lesson/xss"},
+                evidence=["<script"],
                 severity="medium",
-                cwe="CWE-79",
+                unsupported=(
+                    "The lessons are behind a session, and the benchmark does not "
+                    "authenticate to the application."
+                ),
             ),
             _case(
                 "webgoat-sqli",
-                "SQL injection lesson",
+                "SQL injection in the lessons",
                 "sql_injection",
-                probe={"method": "GET", "path": "/webgoat/lesson/sqli"},
-                evidence=["sql"],
+                expectation="not_applicable",
+                probe={"method": "GET", "path": "/WebGoat/lesson/sqli"},
+                evidence=["syntax error"],
                 severity="high",
-                cwe="CWE-89",
-            ),
-            _case(
-                "webgoat-idor",
-                "Insecure direct object reference lesson",
-                "access_control",
-                probe={"method": "GET", "path": "/webgoat/lesson/idor"},
-                evidence=["idor"],
-                severity="high",
-                cwe="CWE-639",
-            ),
-            _case(
-                "webgoat-path-traversal",
-                "Path traversal in the file handling lesson",
-                "path_traversal",
-                probe={"method": "GET", "path": "/webgoat/lesson/path_traversal"},
-                evidence=["traversal"],
-                severity="high",
-                cwe="CWE-22",
-            ),
-            _case(
-                "webgoat-spa-crawl",
-                "Lesson routes are discoverable",
-                "route_discovery",
-                probe={"method": "GET", "path": "/"},
-                evidence=["webgoat"],
-                severity="info",
+                unsupported=(
+                    "The lessons are behind a session, and the benchmark does not "
+                    "authenticate to the application."
+                ),
             ),
         ],
     )

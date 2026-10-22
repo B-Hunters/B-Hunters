@@ -41,8 +41,12 @@ NETWORK = os.environ.get("BHUNTERS_WORKER_NETWORK", "dev_default")
 TAG = "b-hunters-local/{name}:1.2.0"
 
 #: The laboratory application the workers scan.
-TARGET_HOST = "bench-juice-shop"
-TARGET_URL = f"http://{TARGET_HOST}:3000"
+#: The host with the port.  The subdomain payload and the Domain field of
+#: the domain document have to be the same string, or a worker that
+#: derives the status from the URL writes to a document that does not
+#: exist.
+TARGET_HOST = "bench-juice-shop:3000"
+TARGET_URL = f"http://{TARGET_HOST}"
 
 #: The report field each worker is expected to fill.
 REPORT_FIELD = {

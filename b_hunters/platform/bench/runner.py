@@ -79,6 +79,7 @@ class BenchmarkRunner:
         database: Database,
         lab: Optional[LabManager] = None,
         scan_creator: Optional[Callable[..., Any]] = None,
+        worker_collector: Optional[Any] = None,
     ) -> None:
         self.db = database
         self.scans = ScanRepository(database)
@@ -86,6 +87,9 @@ class BenchmarkRunner:
         self.lab = lab or LabManager()
         #: Injected by the API layer; creates and starts a scan.
         self.scan_creator = scan_creator
+        #: An optional collector that drives the real Karton workers and
+        #: returns their findings.
+        self.worker_collector = worker_collector
 
     # ------------------------------------------------------------------
     async def run(self, config: BenchmarkRunConfig) -> dict[str, Any]:
@@ -141,7 +145,9 @@ class BenchmarkRunner:
                     for case in manifest.test_cases
                 ]
 
-        base_url = manifest.internal_url or f"http://{lab_host(manifest)}:{manifest.port}"
+        base_url = manifest.internal_url or (
+            f"http://{lab_host(manifest)}:{manifest.port}{manifest.base_path}"
+        )
         try:
             scan_id = await self._start_scan(manifest, base_url, config)
         except Exception as exc:
@@ -159,8 +165,22 @@ class BenchmarkRunner:
                 for case in manifest.test_cases
             ]
 
+        report_id = self._report_id_for(scan_id)
         await self._await_scan(scan_id)
         findings = self.findings.list(scan_id, limit=5000)
+
+        # The findings the real scanner workers produced.
+        worker_findings: list[dict[str, Any]] = []
+        if self.worker_collector is not None:
+            try:
+                worker_findings = self.worker_collector(
+                    scan_id=scan_id,
+                    report_id=report_id,
+                    target=lab_host(manifest),
+                    url=base_url,
+                )
+            except Exception as exc:  # pragma: no cover - the collector is optional
+                log.warning("the worker collector failed for %s: %s", manifest.slug, exc)
 
         # The time from the start of the scan to the moment a finding was
         # first recorded is the "time to first valid finding".
@@ -168,12 +188,21 @@ class BenchmarkRunner:
         results: list[TestResult] = []
         for case in manifest.test_cases:
             result = self._evaluate(case, manifest, findings)
+            if not result.detected and worker_findings:
+                result = self._evaluate(case, manifest, worker_findings)
             if result.detected:
                 elapsed = self._first_finding_delay(scan_id, scan_started)
                 if elapsed is not None:
                     result.duration_ms = elapsed
             results.append(result)
         return results
+
+    def _report_id_for(self, scan_id: str) -> Any:
+        """The report document the workers write to."""
+        document = self.db.collection("domains").find_one({"Scanid": scan_id})
+        if document and document.get("report_id"):
+            return document["report_id"]
+        return None
 
     def _scan_started_at(self, scan_id: str) -> float:
         document = self.scans.get(scan_id)
