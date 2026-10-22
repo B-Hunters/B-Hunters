@@ -94,6 +94,17 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
     admin_sub.add_parser('list-users', help=f"{Fore.YELLOW}List the platform users")
     admin_sub.add_parser('init-db', help=f"{Fore.YELLOW}Create the database indexes")
     admin_sub.add_parser('seed-roles', help=f"{Fore.YELLOW}Seed the built-in agent definitions")
+    add_provider = admin_sub.add_parser('add-provider', help=f"{Fore.YELLOW}Configure a model provider")
+    add_provider.add_argument('--name', type=str, required=True)
+    add_provider.add_argument('--base-url', type=str, required=True, help=f"{Fore.YELLOW}The OpenAI-compatible base URL")
+    add_provider.add_argument('--model', type=str, required=True)
+    add_provider.add_argument('--api-key', type=str, default=None, help=f"{Fore.YELLOW}Read from BHUNTERS_LLM_API_KEY when omitted")
+    add_provider.add_argument('--role-model', type=str, action='append', default=[], help=f"{Fore.YELLOW}Override the model for a role: role=model")
+    add_provider.add_argument('--timeout', type=float, default=120.0)
+    add_provider.add_argument('--max-retries', type=int, default=2)
+    add_provider.add_argument('--concurrency', type=int, default=4)
+    admin_sub.add_parser('list-providers', help=f"{Fore.YELLOW}List the configured model providers")
+    admin_sub.add_parser('check-provider', help=f"{Fore.YELLOW}Check the connectivity of a provider").add_argument('name', type=str)
 
     bench_parser = subparsers.add_parser('bench', help=f"{Fore.CYAN}Vulnerable application benchmark laboratory")
     bench_sub = bench_parser.add_subparsers(dest='bench_command', required=True)
@@ -709,6 +720,95 @@ def _admin(args):
                 created += 1
         logging.info(f"{Fore.GREEN}Seeded {created} agent definition(s).")
         return 0
+
+    if args.admin_command == 'add-provider':
+        from b_hunters.platform.agents.provider import ProviderConfig
+
+        api_key = args.api_key
+        if api_key is None:
+            api_key = os.environ.get("BHUNTERS_LLM_API_KEY", "")
+        role_models: dict[str, str] = {}
+        for entry in args.role_model or []:
+            role, _, model = entry.partition("=")
+            if role and model:
+                role_models[role.strip()] = model.strip()
+        document = {
+            "name": args.name,
+            "base_url": args.base_url,
+            "api_key": api_key,
+            "model": args.model,
+            "role_models": role_models,
+            "timeout_seconds": args.timeout,
+            "max_retries": args.max_retries,
+            "concurrency": args.concurrency,
+            "enabled": True,
+        }
+        services.providers.upsert(document)
+        services.audit.record(
+            action="provider.upsert",
+            actor="cli",
+            target_type="provider",
+            target_id=args.name,
+            detail={"base_url": args.base_url, "model": args.model},
+        )
+        logging.info(
+            f"{Fore.GREEN}Configured the provider '{args.name}' "
+            f"({args.model} at {args.base_url})."
+        )
+        return 0
+
+    if args.admin_command == 'list-providers':
+        providers = services.providers.list()
+        if not providers:
+            logging.info(f"{Fore.YELLOW}No model provider is configured.")
+            return 0
+        for provider in providers:
+            public = services.providers.public(provider)
+            models = ", ".join(f"{k}={v}" for k, v in (public.get("role_models") or {}).items())
+            logging.info(
+                f"{Fore.CYAN}{public['name']:<20} {public.get('model',''):<24} "
+                f"{public.get('base_url','')}"
+                + (f"  roles: {models}" if models else "")
+            )
+        return 0
+
+    if args.admin_command == 'check-provider':
+        import asyncio
+
+        from b_hunters.platform.agents.provider import Provider, ProviderConfig
+
+        document = services.providers.get(args.name)
+        if document is None:
+            logging.error(f"{Fore.RED}The provider '{args.name}' is not configured.")
+            return 1
+
+        provider = Provider(
+            ProviderConfig(
+                name=document.get("name", args.name),
+                base_url=document.get("base_url", ""),
+                api_key=document.get("api_key", ""),
+                model=document.get("model", ""),
+                role_models=document.get("role_models", {}) or {},
+                timeout_seconds=float(document.get("timeout_seconds", 30.0)),
+            )
+        )
+
+        async def _check() -> int:
+            try:
+                health = await provider.health_check()
+            finally:
+                await provider.aclose()
+            if health.get("reachable"):
+                logging.info(
+                    f"{Fore.GREEN}Reachable: {health.get('name')} "
+                    f"(model available: {health.get('model_available')}, "
+                    f"{health.get('latency_ms')} ms)"
+                )
+                return 0
+            logging.error(f"{Fore.RED}Not reachable: {health.get('error')}")
+            return 1
+
+        return asyncio.run(_check())
 
     if args.admin_command == 'list-users':
         users = services.users.list_users()
