@@ -44,6 +44,7 @@ PLATFORM_COLLECTIONS = (
     "platform_tool_calls",
     "platform_findings",
     "platform_evidence",
+    "platform_services",
     "platform_artifacts",
     "platform_benchmarks",
     "platform_benchmark_runs",
@@ -141,6 +142,13 @@ INDEXES: dict[str, list[IndexSpec]] = {
     "platform_evidence": [
         IndexSpec([("finding_id", ASCENDING)], "by_finding"),
         IndexSpec([("scan_id", ASCENDING)], "by_scan"),
+    ],
+    "platform_services": [
+        IndexSpec([("scan_id", ASCENDING), ("url", ASCENDING)], "by_scan_url"),
+        IndexSpec([("url", ASCENDING)], "by_url"),
+        IndexSpec([("scan_id", ASCENDING), ("host", ASCENDING)], "by_scan_host"),
+        IndexSpec([("services.name", ASCENDING)], "by_service_name"),
+        IndexSpec([("services.version", ASCENDING)], "by_service_version"),
     ],
     "platform_artifacts": [
         IndexSpec([("scan_id", ASCENDING)], "by_scan"),

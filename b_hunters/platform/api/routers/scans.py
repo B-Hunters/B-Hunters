@@ -499,6 +499,7 @@ async def _run_scan(orchestrator: ScanOrchestrator, context: ScanContext, servic
 
 def _build_orchestrator(services: Services) -> ScanOrchestrator:
     from ...agents.provider import Provider
+    from ...scanners.fingerprint_adapter import service_fingerprint_executor
     from ...scanners.graphql_adapter import graphql_analysis_executor
     from ...scanners.native import (
         dependency_analysis_executor,
@@ -513,6 +514,7 @@ def _build_orchestrator(services: Services) -> ScanOrchestrator:
     registry = build_default_registry(
         {
             "security_headers": security_headers_executor,
+            "service_fingerprint": service_fingerprint_executor,
             "tls_configuration": tls_configuration_executor,
             "secret_scan": secret_scan_executor,
             "openapi_discovery": openapi_discovery_executor,
@@ -709,6 +711,27 @@ async def scan_tasks(
             for task in tasks
         ],
         "counts": services.tasks.counts_by_status(scan_id),
+    }
+
+
+@router.get("/{scan_id}/services")
+async def scan_services(
+    scan_id: str,
+    user: CurrentUser = Depends(current_user),
+    services: Services = Depends(get_services),
+) -> dict[str, Any]:
+    """The service inventory of a scan: what runs where, and which version.
+
+    The inventory is what the fingerprinting adapter and the scanner
+    workers identified for every URL, with the signal that identified it.
+    """
+    if services.scans.get(scan_id) is None:
+        raise HTTPException(status_code=404, detail="the scan does not exist")
+    documents = services.services.list_for_scan(scan_id)
+    return {
+        "scan_id": scan_id,
+        "urls": documents,
+        "summary": services.services.summary(scan_id),
     }
 
 

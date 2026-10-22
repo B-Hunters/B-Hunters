@@ -697,6 +697,7 @@ registerRoute('scans/:id', async (params) => {
       <div class="tab" data-tab="agents">Agents</div>
       <div class="tab" data-tab="messages">Collaboration</div>
       <div class="tab" data-tab="tools">Tool calls</div>
+      <div class="tab" data-tab="services">Services</div>
       <div class="tab" data-tab="findings">Findings</div>
     </div>
     <div id="scan-tab-body"></div>`;
@@ -754,6 +755,11 @@ async function renderScanTab(tab, scanId) {
   if (tab === 'tools') {
     const data = await api(`/scans/${scanId}/tool-calls?limit=300`);
     body.innerHTML = `<div class="card"><div class="card-head"><h2>Tool invocations</h2><span class="desc">${data.total} calls, ${data.failed} failed</span></div><div class="card-body tight"><div class="table-scroll">${renderToolCalls(data.tool_calls || [])}</div></div></div>`;
+    return;
+  }
+  if (tab === 'services') {
+    const data = await api(`/scans/${scanId}/services`);
+    body.innerHTML = renderServices(data);
     return;
   }
   if (tab === 'findings') {
@@ -909,6 +915,51 @@ registerRoute('findings', async () => {
   ['f-text', 'f-host'].forEach((id) => el(id).addEventListener('input', apply));
   ['f-sev', 'f-ver'].forEach((id) => el(id).addEventListener('change', apply));
 });
+
+function renderServices(data) {
+  const urls = data.urls || [];
+  const summary = (data.summary && data.summary.services) || [];
+  if (!urls.length) {
+    return '<div class="empty"><div class="big">No services recorded</div>'
+      + 'The fingerprinting adapter identifies what runs on each URL and stores it here.</div>';
+  }
+  const inventory = summary.length ? `
+    <div class="card">
+      <div class="card-head"><h2>Inventory</h2><span class="desc">${summary.length} distinct service(s)</span></div>
+      <div class="card-body tight"><div class="table-scroll">
+        <table><thead><tr><th>Service</th><th>Version</th><th>Category</th><th>Seen on</th></tr></thead>
+        <tbody>${summary.map((item) => `<tr>
+          <td>${escape(item.name)}</td>
+          <td class="mono">${escape(item.version || '-')}</td>
+          <td class="small faint">${escape(item.category || '-')}</td>
+          <td class="small faint">${item.count} url(s)</td>
+        </tr>`).join('')}</tbody></table>
+      </div></div>
+    </div>` : '';
+
+  const perUrl = urls.map((document) => {
+    const services = document.services || [];
+    const rows = services.length ? services.map((service) => `<tr>
+      <td>${escape(service.name)}</td>
+      <td class="mono">${escape(service.version || '-')}</td>
+      <td class="small">${escape(service.category || '-')}</td>
+      <td class="small faint">${escape(service.source || '-')}</td>
+      <td class="num">${Math.round((service.confidence || 0) * 100)}%</td>
+    </tr>`).join('') : '<tr><td colspan="5" class="faint">no service identified</td></tr>';
+    return `<div class="card">
+      <div class="card-head">
+        <h2 class="mono" style="font-size:12.5px">${escape(document.url)}</h2>
+        <span class="desc">HTTP ${document.status_code || '-'} &middot; ${escape(document.title || 'no title')}</span>
+      </div>
+      <div class="card-body tight"><div class="table-scroll">
+        <table><thead><tr><th>Service</th><th>Version</th><th>Category</th><th>Identified by</th><th>Confidence</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      </div></div>
+    </div>`;
+  }).join('');
+
+  return inventory + perUrl;
+}
 
 function renderFindings(items) {
   if (!items.length) return '<div class="empty"><div class="big">No findings</div>Findings appear here once a scanner or agent reports one.</div>';

@@ -31,6 +31,7 @@ from ..db.repositories import (
     FindingRepository,
     MessageRepository,
     ScanRepository,
+    ServiceRepository,
     TaskRepository,
     ToolCallRepository,
 )
@@ -106,6 +107,7 @@ class ScanProfile:
                 "getjs",
                 "jsscanner",
                 "nuclei",
+                "service_fingerprint",
                 "security_headers",
                 "tls_configuration",
                 "secret_scan",
@@ -215,6 +217,7 @@ class ScanOrchestrator:
         self.messages = MessageRepository(database)
         self.findings = FindingRepository(database)
         self.tool_calls = ToolCallRepository(database)
+        self.services = ServiceRepository(database)
         self.provider_factory = provider_factory
         self.tool_registry = tool_registry or ToolRegistry()
         self.scanner_registry = scanner_registry or AdapterRegistry()
@@ -476,6 +479,43 @@ class ScanOrchestrator:
         for item in result.items:
             if not isinstance(item, dict):
                 continue
+
+            # The service inventory is stored per URL, not as findings.
+            if result.kind == "service":
+                self.services.record(
+                    scan_id=context.scan_id,
+                    url=str(item.get("url", "")),
+                    host=str(item.get("host", "")),
+                    status_code=int(item.get("status_code", 0)),
+                    title=str(item.get("title", "")),
+                    server=str(item.get("server", "")),
+                    services=list(item.get("services", [])),
+                    headers=dict(item.get("headers", {})),
+                    cookies=list(item.get("cookies", [])),
+                    favicon_hash=int(item.get("favicon_hash", 0)),
+                    tls=dict(item.get("tls", {})),
+                    detector=name,
+                )
+                self._emit(
+                    context.scan_id,
+                    "services.identified",
+                    {
+                        "scanner": name,
+                        "url": item.get("url", ""),
+                        "services": [
+                            {
+                                "name": service.get("name"),
+                                "version": service.get("version"),
+                                "category": service.get("category"),
+                                "confidence": service.get("confidence"),
+                                "source": service.get("source"),
+                            }
+                            for service in item.get("services", [])
+                        ],
+                    },
+                )
+                continue
+
             findings = item.get("findings")
             if isinstance(findings, list):
                 for finding in findings:

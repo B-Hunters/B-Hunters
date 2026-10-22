@@ -220,3 +220,101 @@ sqlmap           ok           finished   {"Vulns": 0}
 A `Vulns: 0` result is a correct result: the tool ran and found nothing
 on the target.  The point of the check is that the worker **ran** and
 **reported**, not that it found something.
+
+---
+
+## 6. The service inventory
+
+### 6.1 What it answers
+
+*What is running on this URL, which version is it, and which signal said
+so?*  The inventory is stored per URL, so a scan accumulates a picture of
+the estate instead of a list of unconnected observations.
+
+### 6.2 The signals
+
+The research on fingerprinting is consistent about which signals actually
+work, so the platform combines the ones that carry information:
+
+| Signal | What it identifies | Source |
+|---|---|---|
+| Banner grabbing | the web server and its version | `Server`, `X-Powered-By`, `Via`, `X-AspNet-Version`, `X-Runtime-Version` |
+| Cookie analysis | the runtime | `JSESSIONID`, `PHPSESSID`, `ASP.NET_SessionId`, `laravel_session`, `Django`, `Rails` |
+| Cookie *values* | exposed features | `env=graphiql:disable` means the GraphQL IDE is enabled |
+| Meta tag analysis | the CMS and its version | `<meta name="generator" content="WordPress 6.4.2">` |
+| Body markers | the framework | `/wp-content/`, `__next_data__`, `ng-version`, `csrfmiddlewaretoken`, `__viewstate` |
+| Known path probing | the stack | `/wp-login.php`, `/elmah.axd`, `/server-status`, `/actuator` |
+| Favicon hashing | the product | the MurmurHash3 of the base64-encoded favicon |
+| TLS certificate | the appliance | the issuer: WebLogic, ISa2Go, BIG-IP, Barracuda |
+| Header policy | the configuration | `Access-Control-Allow-Origin: *` is a permissive CORS policy |
+
+Each identified service carries a **name**, a **version**, a **category**,
+the **signal that identified it** and a **confidence**.  A version read
+out of a banner is reported with a higher confidence than one inferred
+from a body marker.
+
+### 6.3 The tools it compares against
+
+| Tool | Licence | What it is good at | Where it fits here |
+|---|---|---|---|
+| **Wappalyzer** | GPL-3.0 | 2,500+ signatures, the de-facto dataset | already used by the `webtechnology` worker (`wappy`), and merged into the same inventory |
+| **httpx** | MIT | `-tech-detect` (Wappalyzer data on headers and body), the favicon hash, JARM, TLS, CDN detection | the same signals, in-process |
+| **WhatWeb** | GPL-2.0 | 1,800+ plugins, the deepest version data | a good complement for a deployment that can run it |
+| **wappscan** | GPL-3.0 | eight combined techniques in one binary | the technique list this module follows |
+| **nmap NSE** | NPSL | service and operating system fingerprinting | already in the stack as the `nmap` worker; its banners are merged into the inventory |
+
+The platform does not replace the workers: the `webtechnology` worker
+supplies the Wappalyzer fingerprints and the `nmap` worker supplies the
+service banners, and the native adapter supplies everything the workers
+cannot see — the GraphQL IDE cookie, the CORS policy, the response
+headers of the redirect that carries the session cookie.
+
+### 6.4 The MurmurHash3
+
+The favicon hash is the hash the search engines index, and the details
+matter:
+
+* it is MurmurHash3 **x86_32** with a seed of zero;
+* the favicon is hashed **after base64 encoding**, and the encoding
+  **includes the line breaks** — hashing the raw bytes gives a different
+  value, which makes the lookup silently fail.
+
+The implementation is verified against the five canonical MurmurHash3
+test vectors, and against the published favicon hashes of live sites:
+
+```
+gitlab.com    1265477436   MATCH
+paypal.com     309020573   MATCH
+```
+
+### 6.5 Precision: the false positives that were removed
+
+The first version of the known-path probe treated "the path answered 200"
+as proof of the stack.  A single-page application answers 200 with the
+same document for **every** path, so the probe reported WordPress,
+Joomla, Drupal and TYPO3 on an application that is none of them.
+
+The probe now compares the response against the baseline response of the
+site root — the body length and a hash of the body — and only reports a
+stack when the document is genuinely different.  A fingerprint that names
+a stack that is not there is worse than no fingerprint, because it sends
+the operator after a vulnerability that does not exist.
+
+There is a test for it:
+
+```python
+def test_a_plain_response_identifies_nothing() -> None:
+    """A response with no stack signals must not produce a finding."""
+```
+
+### 6.6 Where the inventory lives
+
+| Where | What |
+|---|---|
+| `platform_services` | one document per scan and URL, with the services, the headers, the cookies, the favicon hash and the certificate |
+| `GET /api/v1/scans/{id}/services` | the inventory and its summary |
+| the *Services* tab of the scan page | the inventory, per URL and aggregated |
+
+The fingerprinting adapter is registered as `service_fingerprint` and is
+part of the standard scan profile, so every scan produces the inventory
+without any configuration.

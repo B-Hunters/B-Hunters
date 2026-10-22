@@ -162,6 +162,7 @@ async def _karton_snapshot(services: Services) -> dict[str, Any]:
 
 async def _tool_health(services: Services) -> dict[str, Any]:
     try:
+        from ...scanners.fingerprint_adapter import service_fingerprint_executor
         from ...scanners.native import (
             dependency_analysis_executor,
             graphql_analysis_executor,
@@ -175,6 +176,7 @@ async def _tool_health(services: Services) -> dict[str, Any]:
         registry = build_default_registry(
             {
                 "security_headers": security_headers_executor,
+                "service_fingerprint": service_fingerprint_executor,
                 "tls_configuration": tls_configuration_executor,
                 "secret_scan": secret_scan_executor,
                 "openapi_discovery": openapi_discovery_executor,

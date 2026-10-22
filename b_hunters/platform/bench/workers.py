@@ -26,6 +26,7 @@ class, so that it can be matched against the benchmark's test cases.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Sequence
 from typing import Any
@@ -151,6 +152,96 @@ def security_header_findings(report: dict[str, Any]) -> list[dict[str, Any]]:
     return findings
 
 
+def _wappalyzer_services(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """The services the technology fingerprinting worker identified.
+
+    The worker writes the Wappalyzer result as
+    ``{"wappy": [{"<url>": [["<category>", "<name>"], ...]}]}``.
+    """
+    services: list[dict[str, Any]] = []
+    technology = report.get("Technology") or {}
+    if not isinstance(technology, dict):
+        return services
+    for detector, entries in technology.items():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            for url, items in entry.items():
+                if not isinstance(items, list):
+                    continue
+                for item in items:
+                    if not isinstance(item, (list, tuple)) or not item:
+                        continue
+                    category = str(item[0])
+                    name = str(item[1]) if len(item) > 1 else category
+                    version = str(item[2]) if len(item) > 2 else ""
+                    services.append(
+                        {
+                            "name": name,
+                            "category": category,
+                            "version": version,
+                            "confidence": 0.85,
+                            "source": f"wappalyzer:{detector}",
+                            "evidence": f"{url} -> {category}: {name}"[:300],
+                        }
+                    )
+    return services
+
+
+_PORT_RE = re.compile(
+    r"Port:\s*(?P<port>\d+)\s*,\s*State:\s*(?P<state>[^,]+),\s*Product:\s*(?P<product>[^,]+)",
+    re.IGNORECASE,
+)
+_PORT_VERSION_RE = re.compile(r"Version:\s*(?P<version>[^,]+)", re.IGNORECASE)
+
+
+def _port_services(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """The services the port scanner identified, with their versions.
+
+    The worker appends to the field with ``$push``/``$each``, so the value
+    is a list of lists of scan results; both the flat and the nested form
+    are accepted.
+    """
+    services: list[dict[str, Any]] = []
+
+    def _entries(value: Any) -> list[dict[str, Any]]:
+        collected: list[dict[str, Any]] = []
+        for item in value or []:
+            if isinstance(item, dict):
+                collected.append(item)
+            elif isinstance(item, list):
+                collected.extend(_entries(item))
+        return collected
+
+    for entry in _entries(report.get("Ports")):
+        target = str(entry.get("target", ""))
+        for banner in entry.get("ports", []) or []:
+            match = _PORT_RE.search(str(banner))
+            if not match:
+                continue
+            product = match.group("product").strip()
+            version_match = _PORT_VERSION_RE.search(str(banner))
+            version = version_match.group("version").strip() if version_match else ""
+            services.append(
+                {
+                    "name": product or "Unknown service",
+                    "category": "Network services",
+                    "version": version,
+                    "confidence": 0.9,
+                    "source": "nmap:service",
+                    "evidence": f"{target}: {banner}"[:300],
+                }
+            )
+    return services
+
+
+def services_from_report(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every service the workers identified, from every worker."""
+    return _wappalyzer_services(report) + _port_services(report)
+
+
 def collect_from_report(report: dict[str, Any]) -> list[dict[str, Any]]:
     """Every finding a report document holds."""
     return findings_from_report(report) + security_header_findings(report)
@@ -177,6 +268,8 @@ class KartonWorkerRunner:
         self.s3_access_key = s3_access_key
         self.s3_secret_key = s3_secret_key
         self.s3_bucket = s3_bucket
+        #: The services the workers identified in the report document.
+        self.services: list[dict[str, Any]] = []
 
     def run(
         self,
@@ -219,6 +312,7 @@ class KartonWorkerRunner:
                 break
             time.sleep(2)
         report = self.db.collection("reports").find_one({"_id": report_id}) or {}
+        self.services = services_from_report(report)
         return collect_from_report(report)
 
     def _send(

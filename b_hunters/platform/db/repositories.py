@@ -656,6 +656,108 @@ class ToolCallRepository:
 
 
 # ----------------------------------------------------------------------
+# Services
+# ----------------------------------------------------------------------
+class ServiceRepository:
+    """The per-URL service inventory."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    @property
+    def _col(self):
+        return self._db.collection("platform_services")
+
+    def record(
+        self,
+        *,
+        scan_id: str,
+        url: str,
+        host: str = "",
+        status_code: int = 0,
+        title: str = "",
+        server: str = "",
+        services: Optional[list[dict[str, Any]]] = None,
+        headers: Optional[dict[str, str]] = None,
+        cookies: Optional[list[str]] = None,
+        favicon_hash: int = 0,
+        tls: Optional[dict[str, str]] = None,
+        detector: str = "",
+    ) -> dict[str, Any]:
+        """Store the fingerprint of one URL.
+
+        The document is keyed by the scan and the URL, so a repeated
+        fingerprint of the same URL updates the record rather than
+        duplicating it.
+        """
+        now = utcnow()
+        document = {
+            "scan_id": scan_id,
+            "url": url,
+            "host": host,
+            "status_code": status_code,
+            "title": title,
+            "server": server,
+            "services": list(services or []),
+            "headers": dict(headers or {}),
+            "cookies": list(cookies or []),
+            "favicon_hash": favicon_hash,
+            "tls": dict(tls or {}),
+            "detector": detector,
+            "updated_at": now,
+        }
+        self._col.update_one({"scan_id": scan_id, "url": url}, {"$set": document}, upsert=True)
+        return document
+
+    def list_for_scan(self, scan_id: str) -> list[dict[str, Any]]:
+        """The fingerprint of every URL in a scan.
+
+        The ``_id`` is stripped: a BSON ``ObjectId`` cannot be serialised
+        into JSON, and the documents are returned straight to the API.
+        """
+        return [
+            {key: value for key, value in document.items() if key != "_id"}
+            for document in self._col.find({"scan_id": scan_id}).sort("url", 1)
+        ]
+
+    def list_services(self, scan_id: str = "") -> list[dict[str, Any]]:
+        """Every service identified in a scan, flattened."""
+        query = {"scan_id": scan_id} if scan_id else {}
+        rows: list[dict[str, Any]] = []
+        for document in self._col.find(query):
+            for service in document.get("services", []):
+                rows.append(
+                    {
+                        "scan_id": document.get("scan_id"),
+                        "url": document.get("url"),
+                        "host": document.get("host"),
+                        **service,
+                    }
+                )
+        return rows
+
+    def summary(self, scan_id: str = "") -> dict[str, Any]:
+        """The service inventory, aggregated by name and version."""
+        counts: dict[str, dict[str, Any]] = {}
+        for service in self.list_services(scan_id):
+            key = f"{service.get('name')} {service.get('version')}".strip()
+            entry = counts.setdefault(
+                key,
+                {
+                    "name": service.get("name"),
+                    "version": service.get("version"),
+                    "category": service.get("category"),
+                    "count": 0,
+                    "urls": [],
+                },
+            )
+            entry["count"] += 1
+            if service.get("url") and len(entry["urls"]) < 50:
+                entry["urls"].append(service.get("url"))
+        return {"services": sorted(counts.values(), key=lambda item: item["name"] or "")}
+
+
+# ----------------------------------------------------------------------
 # Findings and evidence
 # ----------------------------------------------------------------------
 def compute_fingerprint(

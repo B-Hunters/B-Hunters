@@ -19,6 +19,7 @@ from ..db.repositories import (
     MessageRepository,
     ProviderRepository,
     ScanRepository,
+    ServiceRepository,
     SessionRepository,
     TaskRepository,
     ToolCallRepository,
@@ -73,6 +74,7 @@ class Services:
         self.findings = FindingRepository(self.db)
         self.providers = ProviderRepository(self.db)
         self.agent_definitions = AgentDefinitionRepository(self.db)
+        self.services = ServiceRepository(self.db)
         #: The active orchestrator registry, keyed by scan id.
         self.orchestrators: dict[str, Any] = {}
 

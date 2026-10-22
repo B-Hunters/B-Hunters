@@ -272,6 +272,16 @@ def default_all_adapters() -> list[AdapterSpec]:
         ),
         # --- capabilities the existing modules do not cover ---------------
         _native_spec(
+            "service_fingerprint",
+            "1.0.0",
+            "Identifies the services running on each URL, with their versions, using "
+            "banner grabbing, cookie and meta analysis, body markers, known path "
+            "probing, favicon hashing and TLS certificate analysis.",
+            [Capability.TECHNOLOGY_DETECTION],
+            ["service"],
+            upstream="in-process",
+        ),
+        _native_spec(
             "security_headers",
             "1.0.0",
             "Evaluates the presence and correctness of security response headers.",
