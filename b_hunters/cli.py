@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import time
+from pathlib import Path
 
 import pymongo
 from colorama import Fore, Style, init
@@ -108,6 +109,16 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
     admin_sub.add_parser('check-provider', help=f"{Fore.YELLOW}Check the connectivity of a provider").add_argument('name', type=str)
     admin_sub.add_parser('migrate-issues', help=f"{Fore.YELLOW}Link existing findings to durable issues")
     admin_sub.add_parser('migrate-secrets', help=f"{Fore.YELLOW}Encrypt the stored credentials with BHUNTERS_SECRET_KEY")
+    set_password = admin_sub.add_parser('set-password', help=f"{Fore.YELLOW}Set the password of a platform user")
+    set_password.add_argument('--username', type=str, required=True)
+    set_password.add_argument('--password', type=str, default=None)
+    rotate_key = admin_sub.add_parser(
+        'rotate-key', help=f"{Fore.YELLOW}Re-encrypt the stored credentials with a new key"
+    )
+    rotate_key.add_argument('--key', type=str, default=None, help="The new key; one is generated when it is omitted")
+    rotate_key.add_argument(
+        '--write-to', type=str, default=None, help="The environment file to write the new key to"
+    )
 
     bench_parser = subparsers.add_parser('bench', help=f"{Fore.CYAN}Vulnerable application benchmark laboratory")
     bench_sub = bench_parser.add_subparsers(dest='bench_command', required=True)
@@ -710,6 +721,74 @@ def _serve(args):
     return 0
 
 
+def _rotate_key(args, services) -> int:
+    """Re-encrypt the stored credentials with a new key.
+
+    The credentials are read with the current key and written with the
+    new one, in one pass.  A credential that cannot be read stops the
+    rotation: half-rotated credentials are worse than none, because the
+    old key no longer opens them and the new key does not open what is
+    left.
+    """
+    import base64
+    import os
+
+    from b_hunters.platform.security.secrets import SecretBox, SecretKeyError
+
+    old_box = SecretBox.from_settings(services.settings)
+    if old_box is None:
+        logging.error(f"{Fore.RED}The deployment has no BHUNTERS_SECRET_KEY; there is nothing to rotate.")
+        return 1
+
+    if args.key:
+        try:
+            new_box = SecretBox.from_base64(args.key)
+        except SecretKeyError as exc:
+            logging.error(f"{Fore.RED}The new key is not usable: {exc}")
+            return 1
+    else:
+        new_box = SecretBox.from_base64(base64.b64encode(os.urandom(32)).decode())
+
+    providers = services.db.collection("platform_providers").find({"api_key_ciphertext": {"$exists": True}})
+    rotated = 0
+    for document in list(providers):
+        try:
+            plaintext = old_box.decrypt(document["api_key_ciphertext"])
+        except SecretKeyError as exc:
+            logging.error(f"{Fore.RED}The key of '{document.get('name')}' could not be read: {exc}")
+            return 1
+        services.db.collection("platform_providers").update_one(
+            {"name": document.get("name")},
+            {"$set": {"api_key_ciphertext": new_box.encrypt(plaintext)}},
+        )
+        rotated += 1
+
+    services.audit.record(
+        action="secrets.rotate_key",
+        actor="cli",
+        target_type="deployment",
+        target_id="secret-key",
+        detail={"rotated": rotated},
+    )
+    logging.info(f"{Fore.GREEN}Re-encrypted {rotated} credential(s) with the new key.")
+    if args.write_to:
+        path = Path(args.write_to)
+        lines = []
+        for line in path.read_text(encoding="utf-8").splitlines() if path.exists() else []:
+            if line.startswith("BHUNTERS_SECRET_KEY="):
+                continue
+            lines.append(line)
+        lines.append(f"BHUNTERS_SECRET_KEY={base64.b64encode(new_box.key).decode()}")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        logging.info(f"{Fore.GREEN}Wrote the new key to {path}.")
+    else:
+        logging.info(
+            f"{Fore.YELLOW}The new key is: BHUNTERS_SECRET_KEY={base64.b64encode(new_box.key).decode()}"
+        )
+        logging.info(f"{Fore.YELLOW}Put it in the environment of the platform and of the runner.")
+    return 0
+
+
 def _admin(args):
     """Platform administration commands."""
     from b_hunters.platform.security.passwords import validate_password_strength
@@ -853,6 +932,39 @@ def _admin(args):
             linked += 1
         logging.info(f"{Fore.GREEN}Linked {linked} finding(s) to a durable issue.")
         return 0
+
+    if args.admin_command == 'set-password':
+        password = args.password or os.environ.get("BHUNTERS_BOOTSTRAP_PASSWORD")
+        if not password:
+            import getpass
+
+            try:
+                password = getpass.getpass(f"New password for '{args.username}': ")
+            except (EOFError, KeyboardInterrupt):
+                logging.error(f"{Fore.RED}No password supplied; aborting.")
+                return 1
+        problems = validate_password_strength(password)
+        if problems:
+            for problem in problems:
+                logging.error(f"{Fore.RED}{problem}")
+            return 1
+        user = services.users.get_by_username(args.username)
+        if user is None:
+            logging.error(f"{Fore.RED}There is no user '{args.username}'.")
+            return 1
+        services.users.set_password(user["user_id"], password)
+        services.audit.record(
+            action="user.set_password",
+            actor="cli",
+            target_type="user",
+            target_id=user["user_id"],
+            detail={"username": args.username},
+        )
+        logging.info(f"{Fore.GREEN}The password of '{args.username}' has been changed.")
+        return 0
+
+    if args.admin_command == 'rotate-key':
+        return _rotate_key(args, services)
 
     if args.admin_command == 'list-users':
         users = services.users.list_users()
