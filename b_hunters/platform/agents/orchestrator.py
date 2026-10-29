@@ -41,6 +41,7 @@ from ..db.repositories import (
     compute_fingerprint,
 )
 from ..db.worker_output_repository import WorkerOutputRepository
+from ..errors import ErrorLedger, ledger_from_records
 from ..scanners.base import ScanRequest, ScanResult
 from ..scanners.karton_bridge import (
     KartonWorkerBridge,
@@ -361,9 +362,35 @@ class ScanProfile:
         profile.name = name
         known = set(cls.__dataclass_fields__)
         for key, value in data.items():
-            if key in known and value not in (None, "", [], 0):
+            if key in known and value not in (None, ""):
                 setattr(profile, key, value)
         return profile
+
+    def to_dict(self) -> dict[str, Any]:
+        """The profile as a mapping.
+
+        The scan document holds the profile so that the runner can rebuild
+        the scan from it.  A profile that is not stored is not restored:
+        the scanner list, the agent roles, the concurrency and the limits
+        the operator chose would all be lost, and every scan would run the
+        default plan whatever the scan form said.
+
+        A stored list is authoritative even when it is empty: a scan that
+        names no agent roles means exactly that, and falling back to the
+        default list would run eleven roles the operator did not ask for.
+        """
+        return {
+            "name": self.name,
+            "description": self.description,
+            "agent_roles": list(self.agent_roles),
+            "scanners": list(self.scanners),
+            "max_concurrency": self.max_concurrency,
+            "max_duration_seconds": self.max_duration_seconds,
+            "max_requests_per_second": self.max_requests_per_second,
+            "request_timeout": self.request_timeout,
+            "safe_mode": self.safe_mode,
+            "allow_state_changing": self.allow_state_changing,
+        }
 
 
 @dataclass
@@ -443,6 +470,12 @@ class ScanOrchestrator:
             audit=self._audit_tool_call,
         )
         self._cancelled_scans: set[str] = set()
+        #: The ledger of the failures of every scan this orchestrator
+        #: ran.  It is what decides whether a scan can be called clean.
+        self._ledgers: dict[str, ErrorLedger] = {}
+        #: The scans whose ledger already carries the failures of an
+        #: earlier run, so that a resumed scan is not judged twice.
+        self._seeded: set[str] = set()
 
     # ------------------------------------------------------------------
     # Event helpers
@@ -460,6 +493,9 @@ class ScanOrchestrator:
         itself is visible rather than absent.  The event says which
         tool it was and which task it belonged to.
         """
+        scan_id = str(record.get("scan_id", "") or "")
+        if str(record.get("status", "")) == "error":
+            self._note_failure(scan_id, "tool_call", str(record.get("error", "") or ""))
         stored = False
         try:
             stored = self.tool_calls.record(record)
@@ -468,7 +504,7 @@ class ScanOrchestrator:
         if stored:
             return
         self._emit(
-            str(record.get("scan_id", "")),
+            scan_id,
             "tool.record_failed",
             {
                 "tool": str(record.get("tool", "")),
@@ -477,6 +513,71 @@ class ScanOrchestrator:
                 "error": "the tool call could not be stored",
             },
         )
+        self._note_failure(scan_id, "tool_call", "the tool call could not be stored")
+
+    def _note_tool_call(self, record: dict[str, Any]) -> None:
+        """Note a tool call the agent runtime made.
+
+        The gateway has already recorded the call and what it
+        returned - with the redaction and with the full output.  The
+        runtime reports the same call a second time, and storing it
+        twice would double every tool call of the transcript and every
+        failure of the ledger.
+        """
+
+    # ------------------------------------------------------------------
+    # The error ledger
+    # ------------------------------------------------------------------
+    def _note_failure(self, scan_id: str, source: str, detail: str) -> None:
+        """Record one failure of a scan in its ledger."""
+        if not scan_id:
+            return
+        self._ledger(scan_id).add(source, detail)
+
+    def _ledger(self, scan_id: str) -> ErrorLedger:
+        """The ledger of the failures of a scan."""
+        ledger = self._ledgers.get(scan_id)
+        if ledger is None:
+            ledger = ErrorLedger()
+            self._ledgers[scan_id] = ledger
+        return ledger
+
+    def _seed_ledger(self, scan_id: str) -> ErrorLedger:
+        """The ledger of a scan, with the failures it recorded before.
+
+        A scan that is picked up again keeps the failures of its first
+        run: they are read back from the records, so that the verdict
+        of the resumed scan covers the whole of it.
+        """
+        ledger = self._ledger(scan_id)
+        if scan_id in self._seeded:
+            return ledger
+        self._seeded.add(scan_id)
+        for entry in self._stored_ledger(scan_id).entries():
+            ledger.add(entry["source"], entry["detail"], str(entry.get("status", "") or ""))
+        return ledger
+
+    def _stored_ledger(self, scan_id: str) -> ErrorLedger:
+        """The ledger of the failures the records of a scan hold."""
+        return ledger_from_records(
+            tool_calls=self.tool_calls.list_for_scan(scan_id, limit=5000),
+            events=self.events.list_after(scan_id, 0, limit=2000),
+            tasks=self.tasks.list_for_scan(scan_id),
+        )
+
+    def _write_integrity(self, scan_id: str) -> dict[str, Any]:
+        """Write the verdict of a scan onto its record.
+
+        The verdict is an artefact of the scan: it says whether every
+        failure the scan had a name for.  It is written when the scan
+        ends and can be read again afterwards.
+        """
+        verdict = self._seed_ledger(scan_id).verdict()
+        try:
+            self.scans.update(scan_id, {"integrity": verdict})
+        except Exception:  # pragma: no cover - the database may be down
+            log.exception("failed to write the integrity of the scan %s", scan_id)
+        return verdict
 
     # ------------------------------------------------------------------
     # Cancellation
@@ -614,6 +715,9 @@ class ScanOrchestrator:
         started = time.monotonic()
         self.scans.set_status(context.scan_id, "running")
         self._emit(context.scan_id, "scan.started", {"profile": context.profile.name})
+        # The ledger of the scan starts with the failures it recorded
+        # before: a scan that is picked up again is judged as a whole.
+        self._seed_ledger(context.scan_id)
 
         # The scan has a deadline.  It is stored on the scan, so a scan
         # that is picked up again knows how much of its time is left,
@@ -679,16 +783,20 @@ class ScanOrchestrator:
                 )
                 self.scans.set_phase(context.scan_id, self._phase_after(stage))
         except asyncio.CancelledError:
+            self._write_integrity(context.scan_id)
             self.scans.set_status(context.scan_id, "cancelled")
             self._emit(context.scan_id, "scan.cancelled", {"at": time.time()})
             raise
         except Exception as exc:
             log.exception("scan %s failed", context.scan_id)
+            self._note_failure(context.scan_id, "scan", str(exc))
+            self._write_integrity(context.scan_id)
             self.scans.set_status(context.scan_id, "failed", error=str(exc))
             self._emit(context.scan_id, "scan.failed", {"error": str(exc)})
             return {"status": "failed", "error": str(exc)}
 
         if self._is_cancelled(context.scan_id):
+            self._write_integrity(context.scan_id)
             self.scans.set_status(context.scan_id, "cancelled")
             self._emit(context.scan_id, "scan.cancelled", {"at": time.time()})
             return {"status": "cancelled"}
@@ -702,6 +810,9 @@ class ScanOrchestrator:
                 "scope_violations": scope.violation_count(),
             },
         )
+        # The verdict of the scan: every failure it had, and whether
+        # every one of them had a name.
+        self._write_integrity(context.scan_id)
         self.scans.set_status(context.scan_id, "completed")
         self._emit(
             context.scan_id,
@@ -901,6 +1012,7 @@ class ScanOrchestrator:
         except Exception as exc:
             log.exception("the scanner workers failed for scan %s", context.scan_id)
             self._emit(context.scan_id, "worker.error", {"error": str(exc)})
+            self._note_failure(context.scan_id, "worker", str(exc))
             return
 
         for target, outcome in results:
@@ -912,6 +1024,11 @@ class ScanOrchestrator:
                         "target": target.domain,
                         "error": "no scanner worker consumed the task",
                     },
+                )
+                self._note_failure(
+                    context.scan_id,
+                    "worker",
+                    "no scanner worker consumed the task",
                 )
                 continue
             self._persist_worker_results(context, target, outcome)
@@ -1240,6 +1357,7 @@ class ScanOrchestrator:
         )
         if not result.ok and result.error:
             self._emit(context.scan_id, "scanner.error", {"scanner": name, "error": result.error})
+            self._note_failure(context.scan_id, "scanner", result.error)
 
         for item in result.items:
             if not isinstance(item, dict):
@@ -1449,6 +1567,7 @@ class ScanOrchestrator:
                         exc_info=(type(result), result, result.__traceback__),
                     )
                     self.tasks.set_status(task.task_id, "failed", error=str(result))
+                    self._note_failure(context.scan_id, "task", str(result))
                     continue
 
                 run = result
@@ -1472,12 +1591,14 @@ class ScanOrchestrator:
                     )
                 else:
                     failed.add(task.task_id)
+                    reason = run.error or f"the agent run ended with status '{run.status}'"
                     self.tasks.set_status(
                         task.task_id,
                         "failed",
-                        error=run.error or f"the agent run ended with status '{run.status}'",
+                        error=reason,
                         result=run.to_dict(),
                     )
+                    self._note_failure(context.scan_id, "task", reason)
                 self._emit(
                     context.scan_id,
                     "agent.completed",
@@ -1761,7 +1882,7 @@ class ScanOrchestrator:
                 max_wall_clock_seconds=budget.max_wall_clock_seconds,
             ),
             on_message=lambda message: self._persist_message(context, message, collaboration),
-            on_tool_call=self._audit_tool_call,
+            on_tool_call=self._note_tool_call,
         )
 
         self.tasks.set_status(task.task_id, "running")

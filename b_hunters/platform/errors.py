@@ -16,6 +16,7 @@ every scan that did any work.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 #: The classes a failure can have.  ``crash`` and ``unexplained`` are
@@ -41,6 +42,7 @@ FAILING_CLASSES = ("crash", "unexplained")
 _HTTP_STATUS = re.compile(
     r"\bhttp(?:/\d(?:\.\d)?)?\s*(\d{3})\b|"
     r"\b(?:status|status code|code|error)\D{0,12}\b([1-5]\d{2})\b|"
+    r"\breturned\s+([1-5]\d{2})\b|"
     r"\b([1-5]\d{2})\s+(?:Not Found|Forbidden|Unauthorized|Unauthorised|Bad Request|"
     r"Internal Server Error|Service Unavailable|Too Many Requests)\b",
     re.IGNORECASE,
@@ -183,3 +185,50 @@ class ErrorLedger:
             "total": len(self._entries),
             "verdict": "fail" if failing else "pass",
         }
+
+
+#: The kinds of scan event that record a failure, and where the failure
+#: came from.
+FAILURE_EVENTS = {
+    "scanner.error": "scanner",
+    "worker.error": "worker",
+    "tool.record_failed": "tool_call",
+}
+
+
+def ledger_from_records(
+    *,
+    tool_calls: Sequence[Any] = (),
+    events: Sequence[Any] = (),
+    tasks: Sequence[Any] = (),
+) -> ErrorLedger:
+    """The ledger of the failures a scan recorded.
+
+    The records are the ones the platform keeps: the tool calls that
+    failed, the scanner and the worker errors of the scan and the tasks
+    that failed.  A scan that is read long after it ended still gets a
+    verdict, and the verdict is the one the scan recorded when it
+    finished.
+    """
+    ledger = ErrorLedger()
+    for call in tool_calls:
+        if not isinstance(call, dict):
+            continue
+        if str(call.get("status", "")) != "error":
+            continue
+        ledger.add("tool_call", str(call.get("error", "") or ""))
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        source = FAILURE_EVENTS.get(str(event.get("kind", "") or ""))
+        if source is None:
+            continue
+        payload = event.get("payload") or {}
+        ledger.add(source, str(payload.get("error", "") or ""))
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        if str(task.get("status", "")) != "failed":
+            continue
+        ledger.add("task", str(task.get("error", "") or ""))
+    return ledger

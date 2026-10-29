@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from b_hunters.platform.errors import ErrorLedger, classify_error
+from b_hunters.platform.errors import ErrorLedger, classify_error, ledger_from_records
 
 
 @pytest.mark.parametrize(
@@ -40,6 +40,10 @@ def test_an_exception_class_is_a_crash():
 
 def test_a_status_code_alone_is_an_http_status():
     assert classify_error("", status="404") == "http_status"
+
+
+def test_a_provider_failure_is_an_http_status():
+    assert classify_error("the model endpoint returned 500") == "http_status"
 
 
 def test_an_expected_failure_keeps_the_verdict_clean():
@@ -83,3 +87,28 @@ def test_the_entries_keep_where_the_failure_came_from():
 
 def test_an_empty_ledger_passes():
     assert ErrorLedger().verdict()["verdict"] == "pass"
+
+
+def test_the_ledger_is_read_back_from_the_records_of_a_scan():
+    ledger = ledger_from_records(
+        tool_calls=[
+            {"status": "ok", "error": ""},
+            {"status": "error", "error": "HTTP 404 Not Found"},
+        ],
+        events=[
+            {"kind": "scanner.completed", "payload": {"error": "nothing"}},
+            {"kind": "scanner.error", "payload": {"error": "Connection refused"}},
+            {"kind": "worker.error", "payload": {"error": "the host could not be resolved"}},
+        ],
+        tasks=[
+            {"status": "succeeded", "error": ""},
+            {"status": "failed", "error": "RuntimeError: boom"},
+        ],
+    )
+
+    verdict = ledger.verdict()
+    assert verdict["total"] == 4
+    assert verdict["by_class"]["http_status"] == 1
+    assert verdict["by_class"]["connection"] == 1
+    assert verdict["by_class"]["dns"] == 1
+    assert verdict["verdict"] == "fail"

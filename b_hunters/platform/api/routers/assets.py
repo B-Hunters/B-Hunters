@@ -41,6 +41,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ...agents.orchestrator import ScanProfile
 from ...agents.roles import builtin_roles
 from ...agents.schemas import stop_reason_for
+from ...errors import ledger_from_records
 from ...scanners.worker_output import WORKER_IDENTITIES
 from ..deps import CurrentUser, Services, current_user, get_services
 
@@ -58,6 +59,9 @@ MAX_TRANSCRIPT_BYTES = 2 * 1024 * 1024
 
 #: The most rows one collection of the transcript is read from.
 MAX_TRANSCRIPT_ROWS = 5000
+
+#: The most failures one answer of the integrity endpoint lists.
+MAX_INTEGRITY_ENTRIES = 200
 
 
 @router.get("/{scan_id}/participation")
@@ -114,6 +118,23 @@ async def scan_transcript(
         cursor=cursor,
         limit=limit,
     )
+
+
+@router.get("/{scan_id}/integrity")
+async def scan_integrity(
+    scan_id: str,
+    user: CurrentUser = Depends(current_user),
+    services: Services = Depends(get_services),
+) -> dict[str, Any]:
+    """The error ledger of the scan and its verdict.
+
+    The ledger is recomputed from the records the scan kept, so the
+    verdict can be read long after the scan ended and checked again.
+    """
+    scan = services.scans.get(scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="the scan does not exist")
+    return integrity_report(services, scan)
 
 
 # ----------------------------------------------------------------------
@@ -243,6 +264,45 @@ def _findings_of_role(services: Services, scan_id: str, role: str) -> tuple[int,
         limit=2000,
     )
     return len(raised), len(confirmed)
+
+
+# ----------------------------------------------------------------------
+# The integrity
+# ----------------------------------------------------------------------
+def integrity_report(services: Services, scan: Any) -> dict[str, Any]:
+    """The error ledger of a scan and its verdict.
+
+    The ledger is read back from the records the scan kept: the tool
+    calls that failed, the scanner and the worker errors and the tasks
+    that failed.  The verdict is ``fail`` only when a failure has no
+    explanation.
+    """
+    ledger = ledger_from_records(
+        tool_calls=services.tool_calls.list_for_scan(scan.scan_id, limit=5000),
+        events=services.events.list_after(scan.scan_id, 0, limit=2000),
+        tasks=services.tasks.list_for_scan(scan.scan_id),
+    )
+    verdict = ledger.verdict()
+    stored = _stored_integrity(services, scan.scan_id)
+    return {
+        "scan_id": scan.scan_id,
+        "verdict": verdict["verdict"],
+        "unexplained": verdict["unexplained"],
+        "crash": verdict["crash"],
+        "by_class": verdict["by_class"],
+        "total": verdict["total"],
+        "entries": ledger.entries()[:MAX_INTEGRITY_ENTRIES],
+        "entries_count": len(ledger.entries()),
+        # What the scan recorded when it ended.
+        "stored": stored,
+    }
+
+
+def _stored_integrity(services: Services, scan_id: str) -> dict[str, Any]:
+    """The verdict the scan recorded when it ended."""
+    document = services.db.collection("platform_scans").find_one({"scan_id": scan_id}) or {}
+    stored = document.get("integrity") or {}
+    return stored if isinstance(stored, dict) else {}
 
 
 # ----------------------------------------------------------------------
