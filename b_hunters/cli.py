@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import sys
 import time
 
 import pymongo
@@ -123,6 +124,14 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
     contracts_parser.add_argument('--workers', type=str, default='', help=f"{Fore.YELLOW}Directory holding the worker repositories")
     contracts_parser.add_argument('--strict', action='store_true', help=f"{Fore.YELLOW}Exit non-zero on warnings as well as errors")
 
+    # Runner command
+    runner_parser = subparsers.add_parser('runner', help=f"{Fore.CYAN}Run the durable job runner")
+    runner_parser.add_argument('--concurrency', type=int, default=None)
+    runner_parser.add_argument('--once', action='store_true', help="Claim and run a single job, then exit")
+    runner_parser.add_argument('--poll-seconds', type=float, default=None)
+    runner_sub = runner_parser.add_subparsers(dest="runner_command")
+    runner_sub.add_parser("status", help=f"{Fore.YELLOW}Show whether a runner is alive")
+
     # Parse the arguments
     args = parser.parse_args()
 
@@ -135,6 +144,8 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
         return _bench(args)
     if args.command == 'contracts':
         return _contracts(args)
+    if args.command == 'runner':
+        return _runner(args)
 
     config = Config(path=args.config)
     global db, s3,producer
@@ -865,6 +876,78 @@ def _admin(args):
     return 1
 
 
+def _runner(args):
+    """Run the durable job runner, or report whether one is alive."""
+    import asyncio
+    import signal
+
+    from b_hunters.platform.runner import Runner, RunnerConfig
+
+    services = _platform_services()
+    settings = services.settings
+
+    if getattr(args, "runner_command", "") == "status":
+        return _runner_status(services)
+
+    config = RunnerConfig(
+        concurrency=(
+            args.concurrency if args.concurrency is not None else settings.runner_concurrency
+        ),
+        lease_seconds=settings.runner_lease_seconds,
+        heartbeat_seconds=settings.runner_heartbeat_seconds,
+        poll_seconds=(
+            args.poll_seconds if args.poll_seconds is not None else settings.runner_poll_seconds
+        ),
+        shutdown_grace_seconds=settings.runner_shutdown_grace_seconds,
+    )
+    runner = Runner(services, config)
+
+    if args.once:
+        result = asyncio.run(runner.run_once())
+        if result is None:
+            logging.info(f"{Fore.YELLOW}No job was waiting.")
+            return 1
+        status = str(result.get("status", ""))
+        if status == "completed":
+            logging.info(f"{Fore.GREEN}The job finished.")
+            return 0
+        logging.error(f"{Fore.RED}The job did not finish: {status or 'unknown'}")
+        return 1
+
+    def _drain(signum, frame):
+        logging.info("the runner was asked to stop; it will not claim new jobs")
+        runner.drain()
+
+    try:
+        signal.signal(signal.SIGTERM, _drain)
+    except ValueError:  # pragma: no cover - not the main thread
+        pass
+
+    logging.info(f"{Fore.GREEN}The runner '{config.owner}' is taking jobs from the queue.")
+    asyncio.run(runner.run_forever())
+    return 0
+
+
+def _runner_status(services):
+    """Report the state of the runner."""
+    from b_hunters.platform.runner import HEARTBEAT_MAX_AGE_SECONDS
+
+    document = services.db.collection("platform_runner_heartbeats").find_one(
+        sort=[("last_seen_at", -1)]
+    )
+    if not document:
+        logging.error(f"{Fore.RED}No runner has reported a heartbeat yet.")
+        return 1
+    age = time.time() - float(document.get("last_seen_at", 0))
+    logging.info(f"{Fore.CYAN}runner_id: {document.get('runner_id', '')}")
+    logging.info(f"{Fore.CYAN}last seen: {age:.1f}s ago")
+    logging.info(f"{Fore.CYAN}current job: {document.get('current_job_id') or 'none'}")
+    if age < HEARTBEAT_MAX_AGE_SECONDS:
+        return 0
+    logging.error(f"{Fore.RED}The runner has not reported for {age:.0f}s; it is stale.")
+    return 1
+
+
 def _bench(args):
     """Vulnerable application benchmark commands."""
     import json
@@ -919,7 +1002,7 @@ def _bench(args):
                 return 1
 
         async def _run():
-            from b_hunters.platform.api.routers.scans import _build_orchestrator
+            from b_hunters.platform.agents.factory import build_orchestrator
 
             # The real worker stack, when one is reachable.
             worker_collector = None
@@ -999,7 +1082,7 @@ def _bench(args):
                         },
                     }
                 )
-                orchestrator = _build_orchestrator(services)
+                orchestrator = build_orchestrator(services)
                 from b_hunters.platform.agents.orchestrator import ScanContext, ScanProfile
 
                 context = ScanContext(
@@ -1153,4 +1236,7 @@ def _build_worker_runner(services):
 
 
 if __name__ == "__main__":
-    main()
+    # The exit code is the return value of ``main``: the commands that
+    # report a health (the runner status) must be able to fail a health
+    # check.
+    sys.exit(main())

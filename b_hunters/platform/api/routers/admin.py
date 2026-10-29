@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from ...agents.roles import builtin_roles
+from ...runner import DRAIN_COUNTER_KEY
 from ...security.passwords import validate_password_strength
 from ..deps import (
     CurrentUser,
@@ -328,6 +329,56 @@ async def list_agent_roles(
         "roles": [role.to_dict() for role in builtin_roles().values()],
         "count": len(builtin_roles()),
     }
+
+
+# ----------------------------------------------------------------------
+# Runner
+# ----------------------------------------------------------------------
+@router.post("/runner/drain")
+async def drain_runner(
+    request: Request,
+    user: CurrentUser = Depends(require_role("admin")),
+    services: Services = Depends(get_services),
+    csrf: None = Depends(enforce_csrf),
+) -> dict[str, Any]:
+    """Ask the runner to stop claiming new jobs.
+
+    The job the runner is working on is allowed to finish; the runner
+    then stops.  The flag lives in the database, so it survives the
+    restart of the runner.
+    """
+    services.db.collection("platform_counters").update_one(
+        {"key": DRAIN_COUNTER_KEY},
+        {"$set": {"value": 1}},
+        upsert=True,
+    )
+    services.audit.record(
+        action="runner.drain",
+        actor=user.username,
+        target_type="runner",
+        target_id="runner",
+        ip_address=request.client.host if request.client else "",
+    )
+    return {"status": "draining"}
+
+
+@router.delete("/runner/drain")
+async def resume_runner(
+    request: Request,
+    user: CurrentUser = Depends(require_role("admin")),
+    services: Services = Depends(get_services),
+    csrf: None = Depends(enforce_csrf),
+) -> dict[str, Any]:
+    """Let the runner claim jobs again."""
+    services.db.collection("platform_counters").delete_one({"key": DRAIN_COUNTER_KEY})
+    services.audit.record(
+        action="runner.resume",
+        actor=user.username,
+        target_type="runner",
+        target_id="runner",
+        ip_address=request.client.host if request.client else "",
+    )
+    return {"status": "running"}
 
 
 # ----------------------------------------------------------------------

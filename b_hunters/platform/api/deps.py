@@ -10,6 +10,7 @@ from typing import Any, Optional
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from ..db.client import Database, get_database
+from ..db.jobs import JobRepository, TargetLockRepository
 from ..db.repositories import (
     AgentDefinitionRepository,
     AgentStateRepository,
@@ -26,6 +27,7 @@ from ..db.repositories import (
     UserRepository,
 )
 from ..db.worker_output_repository import WorkerOutputRepository
+from ..security.secrets import SecretBox
 from ..security.sessions import (
     Session,
     requires_csrf,
@@ -73,11 +75,18 @@ class Services:
         self.messages = MessageRepository(self.db)
         self.tool_calls = ToolCallRepository(self.db)
         self.findings = FindingRepository(self.db)
+        #: The encryption of the stored credentials.  ``None`` when the
+        #: deployment has not configured a key yet.
+        self.secret_box = SecretBox.from_settings(self.settings)
         self.providers = ProviderRepository(self.db)
         self.agent_definitions = AgentDefinitionRepository(self.db)
         self.services = ServiceRepository(self.db)
         #: What the scanner workers produced, saved per scan.
         self.worker_output = WorkerOutputRepository(self.db)
+        #: The durable queue the runner takes its jobs from.
+        self.jobs = JobRepository(self.db)
+        #: One scan per target at a time.
+        self.locks = TargetLockRepository(self.db)
         #: The active orchestrator registry, keyed by scan id.
         self.orchestrators: dict[str, Any] = {}
 

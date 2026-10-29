@@ -11,15 +11,14 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 
+from ...agents.factory import build_orchestrator, build_scan_context
 from ...agents.orchestrator import (
     REPORTING_ROLES,
     VERIFICATION_ROLES,
     ScanContext,
     ScanOrchestrator,
     ScanProfile,
-    agent_roles_for,
 )
-from ...agents.provider import ProviderConfig
 from ...scanners import worker_output
 from ...security.scope import ScopeEnforcer, build_policy_from_scan
 from ..deps import (
@@ -497,33 +496,9 @@ async def start_scan(
             detail=f"the scan is '{scan.status}' and cannot be started",
         )
 
-    definition = scan.definition or {}
-    profile_data = definition.get("profile") or {}
-    profile = ScanProfile.from_dict(profile_data) if profile_data else ScanProfile.default()
-    if not profile_data and services.settings.agent_verification_enabled:
-        profile.agent_roles = agent_roles_for(profile, verification_enabled=True)
+    context = build_scan_context(scan, services.settings)
 
-    context = ScanContext(
-        scan_id=scan_id,
-        name=scan.name,
-        targets=list(definition.get("targets", [])),
-        authorized_hosts=list((scan.scope or {}).get("authorized_hosts", [])),
-        excluded_paths=list((scan.scope or {}).get("excluded_paths", [])),
-        profile=profile,
-        test_accounts=list(definition.get("test_accounts", [])),
-        artifacts=list(definition.get("artifacts", [])),
-        schema_artifacts=list(definition.get("schema_artifacts", [])),
-        safe_mode=bool(definition.get("safe_mode", True)),
-        allow_private_network=bool((scan.scope or {}).get("allow_private_network", False)),
-        allow_state_changing=bool((scan.scope or {}).get("allow_state_changing", False)),
-        max_duration_seconds=int((scan.scope or {}).get("max_duration_seconds", 3600)),
-        max_requests_per_second=float((scan.scope or {}).get("max_requests_per_second", 10.0)),
-        request_timeout=float((scan.scope or {}).get("request_timeout", 20.0)),
-        workspace_root=services.settings.agent_workspace_root,
-        options={"provider": definition.get("provider", "")},
-    )
-
-    orchestrator = _build_orchestrator(services)
+    orchestrator = build_orchestrator(services)
     services.orchestrators[scan_id] = orchestrator
 
     asyncio.create_task(_run_scan(orchestrator, context, services))
@@ -546,71 +521,6 @@ async def _run_scan(orchestrator: ScanOrchestrator, context: ScanContext, servic
         services.scans.set_status(context.scan_id, "failed", error=str(exc))
     finally:
         services.orchestrators.pop(context.scan_id, None)
-
-
-def _build_orchestrator(services: Services) -> ScanOrchestrator:
-    from ...agents.provider import Provider
-    from ...scanners.fingerprint_adapter import service_fingerprint_executor
-    from ...scanners.graphql_adapter import graphql_analysis_executor
-    from ...scanners.karton_bridge import build_worker_bridge
-    from ...scanners.native import (
-        dependency_analysis_executor,
-        openapi_discovery_executor,
-        secret_scan_executor,
-        security_headers_executor,
-        tls_configuration_executor,
-    )
-    from ...scanners.registry import build_default_registry
-    from ...tools.builtin import build_tool_registry
-
-    registry = build_default_registry(
-        {
-            "security_headers": security_headers_executor,
-            "service_fingerprint": service_fingerprint_executor,
-            "tls_configuration": tls_configuration_executor,
-            "secret_scan": secret_scan_executor,
-            "openapi_discovery": openapi_discovery_executor,
-            "graphql_analysis": graphql_analysis_executor,
-            "dependency_analysis": dependency_analysis_executor,
-        }
-    )
-
-    def provider_factory(provider_name: str = "") -> Provider:
-        config = _provider_config(services, provider_name)
-        return Provider(config)
-
-    return ScanOrchestrator(
-        database=services.db,
-        settings=services.settings,
-        provider_factory=provider_factory,
-        tool_registry=build_tool_registry(),
-        scanner_registry=registry,
-        worker_bridge=build_worker_bridge(settings=services.settings, database=services.db),
-    )
-
-
-def _provider_config(services: Services, provider_name: str = "") -> ProviderConfig:
-    from ...agents.provider import provider_config_from_env
-
-    if provider_name:
-        document = services.providers.get(provider_name)
-        if document:
-            return ProviderConfig(
-                name=document.get("name", provider_name),
-                base_url=document.get("base_url", ""),
-                api_key=document.get("api_key", "") or "",
-                model=document.get("model", ""),
-                role_models=document.get("role_models", {}) or {},
-                temperature=float(document.get("temperature", 0.0)),
-                max_output_tokens=int(document.get("max_output_tokens", 4096)),
-                max_context_tokens=int(document.get("max_context_tokens", 128000)),
-                timeout_seconds=float(document.get("timeout_seconds", 120.0)),
-                max_retries=int(document.get("max_retries", 2)),
-                concurrency=int(document.get("concurrency", 4)),
-                extra_headers=document.get("extra_headers", {}) or {},
-                enabled=bool(document.get("enabled", True)),
-            )
-    return provider_config_from_env()
 
 
 @router.post("/{scan_id}/pause")
