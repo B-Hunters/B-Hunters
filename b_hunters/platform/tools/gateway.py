@@ -200,6 +200,22 @@ class ToolDefinition:
 ToolHandler = Callable[..., Any]
 
 
+def bound_output(text: str, limit: int) -> tuple[str, bool, int]:
+    """Cut a rendered output to the limit, in bytes.
+
+    Returns the text to store, whether it had to be cut and how many
+    bytes the whole output had.  The model saw the rendered output and
+    nothing beyond the limit, so the platform stores that output and
+    never more of it.  A cut is never silent: the row says that it was
+    cut and how big the output really was.
+    """
+    raw = str(text).encode("utf-8", errors="ignore")
+    size = len(raw)
+    if size <= limit:
+        return str(text), False, size
+    return raw[:limit].decode("utf-8", errors="ignore"), True, size
+
+
 class ToolRegistry:
     """Holds the available tool implementations."""
 
@@ -324,6 +340,11 @@ class ToolGateway:
             "status": "error",
             "arguments": redact_mapping(arguments),
             "at": time.time(),
+            # The output of the call.  It is filled in when the call
+            # succeeds; a call that failed has none.
+            "output": "",
+            "output_bytes": 0,
+            "output_truncated": False,
         }
 
         definition = self.registry.get(tool_name)
@@ -379,9 +400,16 @@ class ToolGateway:
             )
 
         rendered = self._render(output, context)
+        stored, truncated, size = bound_output(str(rendered), context.permissions.max_output_bytes)
         record["status"] = "ok"
         record["duration_ms"] = int((time.monotonic() - started) * 1000)
         record["output_summary"] = redact_text(str(rendered))[:2000]
+        # The full output, next to the summary.  The transcript shows
+        # the full text; the console lists the summary.  What is stored
+        # is what the model saw and never more than that.
+        record["output"] = stored
+        record["output_truncated"] = truncated
+        record["output_bytes"] = size
         self._emit(record)
 
         return ToolResult(

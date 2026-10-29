@@ -454,10 +454,29 @@ class ScanOrchestrator:
             log.exception("failed to persist a scan event")
 
     def _audit_tool_call(self, record: dict[str, Any]) -> None:
+        """Record one tool call.
+
+        A write that fails is reported: a tool that could not record
+        itself is visible rather than absent.  The event says which
+        tool it was and which task it belonged to.
+        """
+        stored = False
         try:
-            self.tool_calls.record(record)
+            stored = self.tool_calls.record(record)
         except Exception:  # pragma: no cover
             log.exception("failed to persist a tool call record")
+        if stored:
+            return
+        self._emit(
+            str(record.get("scan_id", "")),
+            "tool.record_failed",
+            {
+                "tool": str(record.get("tool", "")),
+                "task_id": str(record.get("task_id", "")),
+                "role": str(record.get("agent_role", "")),
+                "error": "the tool call could not be stored",
+            },
+        )
 
     # ------------------------------------------------------------------
     # Cancellation

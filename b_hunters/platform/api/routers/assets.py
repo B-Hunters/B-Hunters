@@ -32,6 +32,8 @@ reported as a success.
 
 from __future__ import annotations
 
+import base64
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -47,6 +49,15 @@ router = APIRouter(prefix="/scans", tags=["assets"])
 #: The status of a role that never ran.  It is neither a success nor a
 #: failure: the role was planned and nothing happened.
 NOT_STARTED = "not_started"
+
+#: The most items one page of the transcript returns.
+MAX_TRANSCRIPT_ITEMS = 200
+
+#: The most bytes one page of the transcript returns.
+MAX_TRANSCRIPT_BYTES = 2 * 1024 * 1024
+
+#: The most rows one collection of the transcript is read from.
+MAX_TRANSCRIPT_ROWS = 5000
 
 
 @router.get("/{scan_id}/participation")
@@ -73,6 +84,36 @@ async def scan_agent_report(
     if scan is None:
         raise HTTPException(status_code=404, detail="the scan does not exist")
     return agent_report(services, scan)
+
+
+@router.get("/{scan_id}/transcript")
+async def scan_transcript(
+    scan_id: str,
+    role: str = "",
+    task_id: str = "",
+    cursor: str = "",
+    limit: int = 100,
+    user: CurrentUser = Depends(current_user),
+    services: Services = Depends(get_services),
+) -> dict[str, Any]:
+    """The transcript of a scan, of one role or of one task.
+
+    The messages and the tool calls are merged into one stream in the
+    order they happened.  The page holds at most 200 items and 2 MB;
+    ``next_cursor`` points at the rest and ``truncated`` says that
+    there is more.
+    """
+    scan = services.scans.get(scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="the scan does not exist")
+    return transcript_page(
+        services,
+        scan_id,
+        role=role,
+        task_id=task_id,
+        cursor=cursor,
+        limit=limit,
+    )
 
 
 # ----------------------------------------------------------------------
@@ -202,6 +243,217 @@ def _findings_of_role(services: Services, scan_id: str, role: str) -> tuple[int,
         limit=2000,
     )
     return len(raised), len(confirmed)
+
+
+# ----------------------------------------------------------------------
+# The transcript
+# ----------------------------------------------------------------------
+def transcript_page(
+    services: Services,
+    scan_id: str,
+    *,
+    role: str = "",
+    task_id: str = "",
+    cursor: str = "",
+    limit: int = 100,
+) -> dict[str, Any]:
+    """One page of the transcript of a scan.
+
+    The messages and the tool calls are read oldest first and merged
+    into one stream, so that the reader sees what happened and in
+    which order.  The cursor points at the last item of the page, and
+    the flag says whether there is more to read.
+    """
+    items = _transcript_items(services, scan_id, role=role, task_id=task_id)
+    start = _cursor_position(items, cursor)
+    page, truncated = _page_of(items, start, limit)
+    return {
+        "scan_id": scan_id,
+        "messages": [_without_id(item["document"]) for item in page if item["kind"] == "message"],
+        "tool_calls": [_without_id(item["document"]) for item in page if item["kind"] == "tool_call"],
+        "count": len(page),
+        "next_cursor": _encode_cursor(page[-1]) if page and truncated else "",
+        "truncated": truncated,
+    }
+
+
+def transcript_text(
+    services: Services,
+    scan_id: str,
+    *,
+    role: str = "",
+    limit_bytes: int = MAX_TRANSCRIPT_BYTES,
+) -> tuple[str, int]:
+    """The transcript of a scan as text, with what did not fit.
+
+    The text is cut at the byte budget and the number of the omitted
+    bytes is returned, so that the report can say what it left out
+    instead of pretending that it printed everything.
+    """
+    items = _transcript_items(services, scan_id, role=role)
+    lines: list[str] = []
+    size = 0
+    omitted = 0
+    for item in items:
+        line = _transcript_line(item)
+        encoded = len(line.encode("utf-8", errors="ignore"))
+        if size + encoded > limit_bytes:
+            omitted += encoded
+            continue
+        lines.append(line)
+        size += encoded
+    return "\n".join(lines), omitted
+
+
+def _transcript_items(
+    services: Services,
+    scan_id: str,
+    *,
+    role: str = "",
+    task_id: str = "",
+) -> list[dict[str, Any]]:
+    """The messages and the tool calls of a scan, in the order they happened.
+
+    The tool calls are stored newest first and the messages oldest
+    first, so both are read by their time and merged: the reader gets
+    one stream and not two lists that have to be put together by hand.
+    """
+    items: list[dict[str, Any]] = []
+
+    message_query: dict[str, Any] = {"scan_id": scan_id}
+    if task_id:
+        message_query["task_id"] = task_id
+    if role:
+        message_query["sender_role"] = role
+    for document in (
+        services.db.collection("platform_messages")
+        .find(message_query)
+        .sort("at", 1)
+        .limit(MAX_TRANSCRIPT_ROWS)
+    ):
+        items.append(
+            {
+                "kind": "message",
+                "rank": 0,
+                "at": _at_of(document),
+                "ident": str(document.get("message_id", "") or ""),
+                "document": document,
+            }
+        )
+
+    call_query: dict[str, Any] = {"scan_id": scan_id}
+    if task_id:
+        call_query["task_id"] = task_id
+    if role:
+        call_query["agent_role"] = role
+    for document in (
+        services.db.collection("platform_tool_calls")
+        .find(call_query)
+        .sort("at", 1)
+        .limit(MAX_TRANSCRIPT_ROWS)
+    ):
+        items.append(
+            {
+                "kind": "tool_call",
+                "rank": 1,
+                "at": _at_of(document),
+                "ident": str(document.get("call_id", "") or ""),
+                "document": document,
+            }
+        )
+
+    items.sort(key=_sort_key)
+    return items
+
+
+def _sort_key(item: dict[str, Any]) -> tuple[float, int, str]:
+    """The order of an item in the stream."""
+    return (float(item["at"]), int(item["rank"]), str(item["ident"]))
+
+
+def _at_of(document: dict[str, Any]) -> float:
+    """When an item happened."""
+    try:
+        return float(document.get("at", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _without_id(document: dict[str, Any]) -> dict[str, Any]:
+    """A document without its BSON identifier, which JSON cannot carry."""
+    return {key: value for key, value in document.items() if key != "_id"}
+
+
+def _item_size(item: dict[str, Any]) -> int:
+    """How many bytes an item of the stream takes."""
+    try:
+        return len(json.dumps(item["document"], default=str).encode("utf-8", errors="ignore"))
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return 0
+
+
+def _page_of(
+    items: list[dict[str, Any]],
+    start: int,
+    limit: int,
+) -> tuple[list[dict[str, Any]], bool]:
+    """The items of one page, and whether there are more."""
+    count = max(1, min(int(limit), MAX_TRANSCRIPT_ITEMS))
+    page: list[dict[str, Any]] = []
+    size = 0
+    for item in items[start:]:
+        if len(page) >= count:
+            break
+        item_size = _item_size(item)
+        if page and size + item_size > MAX_TRANSCRIPT_BYTES:
+            break
+        page.append(item)
+        size += item_size
+    return page, start + len(page) < len(items)
+
+
+def _cursor_position(items: list[dict[str, Any]], cursor: str) -> int:
+    """Where the page that follows the cursor starts."""
+    key = _decode_cursor(cursor)
+    if key is None:
+        return 0
+    for index, item in enumerate(items):
+        if _sort_key(item) > key:
+            return index
+    return len(items)
+
+
+def _encode_cursor(item: dict[str, Any]) -> str:
+    """The cursor that points at one item of the stream."""
+    raw = f"{_sort_key(item)[0]!r}|{_sort_key(item)[1]}|{_sort_key(item)[2]}"
+    return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _decode_cursor(cursor: str) -> tuple[float, int, str] | None:
+    """The item a cursor points at, or nothing when it is unreadable."""
+    if not cursor:
+        return None
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        raw = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+        at, rank, ident = raw.split("|", 2)
+        return (float(at), int(rank), ident)
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return None
+
+
+def _transcript_line(item: dict[str, Any]) -> str:
+    """One item of the transcript as a line of text."""
+    document = item["document"]
+    if item["kind"] == "message":
+        role = str(document.get("sender_role", "") or "")
+        kind = str(document.get("kind", "") or "")
+        text = str(document.get("hypothesis", "") or "")
+        return f"[{role}] {kind}: {text}"
+    tool = str(document.get("tool", "") or "")
+    status = str(document.get("status", "") or "")
+    output = str(document.get("output", "") or document.get("output_summary", "") or "")
+    return f"[{document.get('agent_role', '')}] tool {tool} ({status}):\n{output}"
 
 
 # ----------------------------------------------------------------------

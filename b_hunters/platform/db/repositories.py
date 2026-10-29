@@ -743,22 +743,55 @@ class ToolCallRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    def record(self, call: dict[str, Any]) -> dict[str, Any]:
+    def record(self, call: dict[str, Any]) -> bool:
+        """Store one tool call.
+
+        Returns whether the write succeeded.  A tool call that could
+        not be stored is not a tool call that did not happen: the
+        caller has to be able to see the difference, so a failed write
+        is reported rather than raised into the audit hook.
+        """
         call.setdefault("call_id", new_id())
         call.setdefault("at", utcnow())
-        self._db.collection("platform_tool_calls").insert_one(call)
-        return call
+        try:
+            self._db.collection("platform_tool_calls").insert_one(call)
+        except Exception:
+            log.exception("failed to store the tool call '%s'", call.get("tool", ""))
+            return False
+        return True
 
-    def list_for_scan(self, scan_id: str, *, limit: int = 200, agent_role: str = "") -> list[dict[str, Any]]:
+    def list_for_scan(
+        self,
+        scan_id: str,
+        *,
+        limit: int = 200,
+        agent_role: str = "",
+        task_id: str = "",
+        include_output: bool = False,
+    ) -> list[dict[str, Any]]:
+        """The tool calls of a scan, newest first.
+
+        The full output of a call is up to half a megabyte, and the
+        list is what the console shows - so the full text is left out
+        unless the caller asks for it.  The summary of every call is
+        always there.
+        """
         query: dict[str, Any] = {"scan_id": scan_id}
         if agent_role:
             query["agent_role"] = agent_role
-        return list(
+        if task_id:
+            query["task_id"] = task_id
+        documents = list(
             self._db.collection("platform_tool_calls")
             .find(query)
             .sort("at", DESCENDING)
-            .limit(max(1, min(limit, 1000)))
+            .limit(max(1, min(limit, 5000)))
         )
+        if include_output:
+            return documents
+        for document in documents:
+            document.pop("output", None)
+        return documents
 
     def failure_rate(self, scan_id: str = "") -> tuple[int, int]:
         query = {"scan_id": scan_id} if scan_id else {}
