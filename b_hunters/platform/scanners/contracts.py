@@ -77,7 +77,15 @@ class ContractFinding:
 
 
 def _worker_module(directory: Path) -> Optional[Path]:
-    """Find the worker module inside a worker repository."""
+    """Find the worker module inside a worker repository.
+
+    The repository may hold tests next to the worker, and a test file
+    sorted before the worker would otherwise be analysed as if it were
+    the worker: a repository whose tests sort first would report that
+    the worker declares no identity, because the test file declares
+    none.  The test files are skipped, and the module that defines the
+    Karton subclass wins.
+    """
     candidates = []
     for path in sorted(directory.rglob("*.py")):
         name = path.name
@@ -85,7 +93,19 @@ def _worker_module(directory: Path) -> Optional[Path]:
             continue
         if path.parent.name.startswith("."):
             continue
+        if name.startswith("test_") or name.endswith("_test.py"):
+            continue
+        if "tests" in path.parts or "test" in path.parts:
+            continue
         candidates.append(path)
+
+    for path in candidates:
+        try:
+            source = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:  # pragma: no cover - an unreadable file is not the worker
+            continue
+        if "BHunters" in source or "Karton" in source:
+            return path
     return candidates[0] if candidates else None
 
 
