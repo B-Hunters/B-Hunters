@@ -1,0 +1,108 @@
+{% extends 'layout.html' %}
+{% block title %}worker output - karton-dashboard{% endblock %}
+{% block content %}
+<div class="bs-component" style="padding-top: 10px">
+  <h3 class="text-center">worker output</h3>
+  <p class="text-center text-muted">
+    What each scanner produced, read from the documents the workers write into.
+    A worker with a task count took part in the scan; a worker without one
+    never received anything. A worker that ran and found nothing is not the
+    same as a worker that never ran.
+  </p>
+
+  {% if error %}
+  <div class="alert alert-danger" role="alert">
+    The database could not be read: {{ error }}
+  </div>
+  {% endif %}
+
+  {% if connected %}
+  <p class="text-center text-muted small">
+    {{ connected | length }} worker{{ '' if connected | length == 1 else 's' }} connected to the task router.
+  </p>
+  {% endif %}
+
+  {% if not scans and not error %}
+  <div class="alert alert-info" role="alert">
+    No scan yet. The discovery worker creates a report document when it starts a target.
+  </div>
+  {% endif %}
+
+  {% for scan in scans %}
+  <div class="card mb-4">
+    <div class="card-head">
+      <h2>{{ scan.name or scan.scan_id }}</h2>
+      <span class="desc">{{ scan.target }} &middot; {{ scan.status }}</span>
+    </div>
+    <div class="card-body tight">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 24%">worker</th>
+              <th style="width: 10%">tasks</th>
+              <th style="width: 10%">all scans</th>
+              <th style="width: 12%">items</th>
+              <th style="width: 18%">field</th>
+              <th>output</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for worker in scan.workers %}
+            <tr>
+              <td class="mono small">{{ worker.worker }}</td>
+              <td>
+                {% if worker.ran %}
+                  <span class="badge bg-success">{{ worker.tasks }}</span>
+                {% elif scan.status in ('running', 'pending', 'started') %}
+                  {% if worker.get('total_tasks') %}
+                    <span class="badge bg-info">running</span>
+                  {% else %}
+                    <span class="badge bg-secondary">waiting</span>
+                  {% endif %}
+                {% else %}
+                  <span class="badge bg-secondary">did not run</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if worker.get('total_tasks') %}
+                  <span class="faint small">{{ worker['total_tasks'] }}</span>
+                {% else %}
+                  <span class="faint">-</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if worker['items'] %}
+                  <span class="badge bg-info">{{ worker['items'] }}</span>
+                {% else %}
+                  <span class="faint">-</span>
+                {% endif %}
+              </td>
+              <td class="small faint">
+                {% if worker.output %}
+                  {% for item in worker.output %}{{ item.field }}{% if not loop.last %}, {% endif %}{% endfor %}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td>
+                {% if worker.output %}
+                  {% for item in worker.output %}
+                  <pre style="white-space: pre-wrap; font-size: 0.8rem; margin-bottom: 0.5rem;">{{ item.preview }}</pre>
+                  {% endfor %}
+                {% elif worker.ran %}
+                  <span class="faint small">ran, found nothing</span>
+                {% else %}
+                  <span class="faint small">did not run</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
