@@ -56,9 +56,7 @@ def test_the_inventory_can_be_filtered_by_kind(client, csrf, services):
     repository.upsert(scan_id=scan_id, url="https://demo.test/app.js", kind="js", source="asset_crawl")
     repository.upsert(scan_id=scan_id, url="https://demo.test/logo.png", kind="image", source="asset_crawl")
 
-    response = client.get(
-        f"/api/v1/scans/{scan_id}/assets?kind=js", headers={"X-CSRF-Token": csrf}
-    )
+    response = client.get(f"/api/v1/scans/{scan_id}/assets?kind=js", headers={"X-CSRF-Token": csrf})
 
     assert response.status_code == 200
     payload = response.json()
