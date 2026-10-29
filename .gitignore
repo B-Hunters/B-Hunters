@@ -11,6 +11,11 @@ __pycache__/
 venv/
 .env
 *.local.ini
+# The deployment's configuration files carry the credentials.  They are
+# written from the environment by `scripts/render_config.py`; the
+# examples beside them are the tracked ones.
+deploy/*.ini
+!deploy/*.example.ini
 .coverage
 htmlcov/
 docs/_build/
