@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Sequence
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -363,6 +364,43 @@ def transcript_text(
         lines.append(line)
         size += encoded
     return "\n".join(lines), omitted
+
+
+def transcript_appendix(
+    services: Services,
+    scan_id: str,
+    *,
+    roles: Sequence[str] = (),
+    limit_bytes: int = MAX_TRANSCRIPT_BYTES,
+) -> tuple[list[dict[str, Any]], int]:
+    """The transcript of every role of a scan, with what did not fit.
+
+    The budget is for the whole scan: a scan with twelve roles and a
+    few hundred tool calls carries megabytes of text, and a report that
+    printed all of it would be a document nobody could open.  The
+    number of the omitted bytes is returned, so that the report can say
+    what it left out and where the rest is.
+    """
+    entries: list[dict[str, Any]] = []
+    remaining = max(0, int(limit_bytes))
+    omitted_total = 0
+    for role in roles:
+        items = _transcript_items(services, scan_id, role=role)
+        lines: list[str] = []
+        size = 0
+        omitted = 0
+        for item in items:
+            line = _transcript_line(item)
+            encoded = len(line.encode("utf-8", errors="ignore"))
+            if size + encoded > remaining:
+                omitted += encoded
+                continue
+            lines.append(line)
+            size += encoded
+        remaining -= size
+        omitted_total += omitted
+        entries.append({"role": role, "text": "\n".join(lines), "omitted_bytes": omitted})
+    return entries, omitted_total
 
 
 def _transcript_items(
