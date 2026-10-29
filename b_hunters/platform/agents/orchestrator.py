@@ -27,7 +27,7 @@ from typing import Any, Optional
 from urllib.parse import urljoin, urlsplit
 
 from ..assets import classify, is_external, normalise_url
-from ..db.assets import AssetRepository
+from ..db.assets import AssetRepository, WorkerRunRepository
 from ..db.client import Database
 from ..db.repositories import (
     AgentStateRepository,
@@ -429,6 +429,8 @@ class ScanOrchestrator:
         #: The URLs the scan saw.  Every tool that found one writes into
         #: the same row.
         self.assets = AssetRepository(database)
+        #: What every worker did in this scan.
+        self.worker_runs = WorkerRunRepository(database)
         self.provider_factory = provider_factory
         self.tool_registry = tool_registry or ToolRegistry()
         self.scanner_registry = scanner_registry or AdapterRegistry()
@@ -632,7 +634,9 @@ class ScanOrchestrator:
                     break
                 if stage == "workers":
                     await self._dispatch_scanners(context, scope)
+                    self._snapshot_worker_connections(context)
                     await self._dispatch_workers(context, scope)
+                    self._record_worker_outcomes(context)
                     self._write_coverage(context)
                     self.scans.set_phase(context.scan_id, self._phase_after(stage))
                     continue
@@ -1081,6 +1085,74 @@ class ScanOrchestrator:
         }
         if participation:
             self.scans.update(context.scan_id, {"workers": participation})
+
+    def _snapshot_worker_connections(self, context: ScanContext) -> None:
+        """Record which workers were online when the scan started.
+
+        The snapshot is taken before the work is dispatched: a worker
+        that is online now and gone a minute later must still be
+        reported as the worker that was there when the scan began.
+
+        A backend that cannot be reached records nothing.  An
+        unreachable backend is not evidence that a worker is absent, so
+        nothing is written rather than "not connected" being written for
+        every worker.
+        """
+        if self.worker_bridge is None:
+            return
+        try:
+            identities = self.worker_bridge.online_identities()
+        except Exception:  # pragma: no cover - the backend may be down
+            log.exception("could not read the online workers of the scan %s", context.scan_id)
+            return
+        if not identities:
+            return
+        self.worker_runs.snapshot_connection(context.scan_id, identities)
+
+    def _record_worker_outcomes(self, context: ScanContext) -> None:
+        """Record what every worker did in this scan.
+
+        The tasks a worker consumed, the findings it produced and the
+        tasks that crashed are what tell a worker that ran and found
+        nothing from one that errored.
+        """
+        if self.worker_bridge is None:
+            return
+        try:
+            outcomes = self.worker_bridge.worker_outcomes(context.scan_id)
+        except Exception:  # pragma: no cover - the backend may be down
+            log.exception("could not read the worker outcomes of the scan %s", context.scan_id)
+            return
+        expected = self._expected_worker_versions()
+        for outcome in outcomes:
+            worker = str(outcome.get("worker", ""))
+            if not worker:
+                continue
+            self.worker_runs.record(
+                scan_id=context.scan_id,
+                worker=worker,
+                tasks=int(outcome.get("tasks", 0) or 0),
+                findings=int(outcome.get("findings", 0) or 0),
+                crashed_tasks=int(outcome.get("crashed_tasks", 0) or 0),
+                # A worker that consumed a task was online.
+                connected=True,
+                expected_version=expected.get(worker, ""),
+            )
+
+    def _expected_worker_versions(self) -> dict[str, str]:
+        """The version the platform expects of every worker.
+
+        The workers do not report their version, so this is what the
+        platform expects - not what a worker says it is.
+        """
+        from ..scanners.registry import default_all_adapters
+
+        versions: dict[str, str] = {}
+        for spec in default_all_adapters():
+            identity = str(getattr(spec, "karton_identity", "") or "")
+            if identity:
+                versions[identity] = str(spec.version)
+        return versions
 
     def _persist_worker_results(self, context: ScanContext, target: Any, outcome: Any) -> None:
         """Turn the worker output into platform findings and services."""

@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
+from ..db.assets import WorkerRunRepository
 from ..db.client import Database, get_database
 from ..db.issues import IssueRepository
 from ..db.jobs import JobRepository, TargetLockRepository
@@ -87,6 +88,9 @@ class Services:
         self.services = ServiceRepository(self.db)
         #: What the scanner workers produced, saved per scan.
         self.worker_output = WorkerOutputRepository(self.db)
+        #: What every worker did in a scan: the tasks it consumed, the
+        #: findings it produced and the tasks that crashed.
+        self.worker_runs = WorkerRunRepository(self.db)
         #: The durable queue the runner takes its jobs from.
         self.jobs = JobRepository(self.db)
         #: One scan per target at a time.

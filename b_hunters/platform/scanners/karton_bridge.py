@@ -91,6 +91,33 @@ def host_of(domain: str) -> str:
     return domain.split("/", 1)[0].split(":", 1)[0]
 
 
+#: The report fields whose name does not say which worker writes them.
+#: The findings of a report name the field they came from, and the field
+#: is what says which worker found them.
+_EXTRA_FIELD_WORKERS = {
+    "nmap": "B-Hunters-Nmap",
+    "technology": "B-Hunters-web-technology",
+}
+
+
+def worker_of_detector(detector: str) -> str:
+    """The worker that writes the report field a finding names.
+
+    An empty name means the finding came from nowhere the platform can
+    name - it is not counted for any worker.
+    """
+    name = str(detector or "").strip()
+    if not name:
+        return ""
+
+    from .worker_output import WORKER_FIELDS
+
+    for path, identity in WORKER_FIELDS:
+        if path.rsplit(".", 1)[-1] == name:
+            return identity
+    return _EXTRA_FIELD_WORKERS.get(name, "")
+
+
 @dataclass
 class WorkerTarget:
     """One target handed to the scanner workers."""
@@ -104,6 +131,10 @@ class WorkerTarget:
     #: The identifier of the legacy ``reports`` document, once the
     #: discovery worker has created it.
     report_id: str = ""
+    #: The platform scan this target belongs to.  The bridge keeps the
+    #: analysis of every target of a scan, so that the crashed tasks can
+    #: be counted when the scan asks for them.
+    platform_scan_id: str = ""
 
 
 @dataclass
@@ -132,6 +163,15 @@ class KartonWorkerBridge:
         self.db = database
         self.wait_seconds = wait_seconds
         self.poll_seconds = poll_seconds
+        #: The analysis trees of the scans this bridge drove, so that the
+        #: crashed tasks can be counted after the scan is over.
+        self._analyses: dict[str, list[str]] = {}
+        #: The task counters as they were before a scan dispatched its
+        #: work.  The counters are kept across every scan, so the
+        #: difference is what this scan made the workers do.
+        self._counters: dict[str, dict[str, int]] = {}
+        #: The findings every worker produced, per scan.
+        self._findings: dict[str, dict[str, int]] = {}
 
     # ------------------------------------------------------------------
     # Publishing
@@ -158,7 +198,65 @@ class KartonWorkerBridge:
                 "Platform_Scan_Id": platform_scan_id,
             }
         )
-        return WorkerTarget(url=url, domain=domain, legacy_scan_id=str(scan_oid))
+        if platform_scan_id:
+            # The counters are kept across every scan: the ones from
+            # before this scan are what tell the console which workers
+            # took part in *this* scan.
+            self._counters.setdefault(platform_scan_id, self.consumed_tasks())
+        return WorkerTarget(
+            url=url,
+            domain=domain,
+            legacy_scan_id=str(scan_oid),
+            platform_scan_id=platform_scan_id,
+        )
+
+    def online_identities(self) -> list[str]:
+        """The identity of every consumer that is online right now.
+
+        The Redis client name *is* the worker identity, so the names the
+        backend reports are the identities.  A backend that cannot be
+        reached reports nothing: an unreachable backend is not evidence
+        that a worker is absent, and the caller records nothing rather
+        than recording "not connected".
+        """
+        try:
+            consumers = self.producer.backend.get_online_consumers()
+        except Exception as exc:  # pragma: no cover - the backend may be down
+            log.debug("could not read the online consumers: %s", exc)
+            return []
+        identities = {str(name).strip() for name in (consumers or {})}
+        return sorted(name for name in identities if name)
+
+    def worker_outcomes(self, scan_id: str) -> list[dict[str, Any]]:
+        """What every worker did in a scan.
+
+        Three facts per worker: the tasks it consumed, the findings it
+        produced and the tasks that crashed.  The first comes from the
+        counters Karton keeps, the second from the findings that were
+        read back and the third from the analysis tree of the scan - the
+        tree the bridge keeps the root uid of.
+        """
+        before = self._counters.get(scan_id, {})
+        after = self.consumed_tasks()
+        tasks: dict[str, int] = {}
+        for identity, count in after.items():
+            delta = count - int(before.get(identity, 0))
+            if delta > 0:
+                tasks[identity] = delta
+        crashed = self._crashed_tasks(scan_id)
+        findings = self._findings.get(scan_id, {})
+
+        rows: list[dict[str, Any]] = []
+        for identity in sorted(set(tasks) | set(crashed) | set(findings)):
+            rows.append(
+                {
+                    "worker": identity,
+                    "tasks": tasks.get(identity, 0),
+                    "findings": findings.get(identity, 0),
+                    "crashed_tasks": crashed.get(identity, 0),
+                }
+            )
+        return rows
 
     def consumed_tasks(self) -> dict[str, int]:
         """How many tasks each service has consumed, per identity.
@@ -203,7 +301,13 @@ class KartonWorkerBridge:
         task.add_payload("data", target.domain)
         task.add_payload("source", "producer")
         self.producer.send_task(task)
-        return str(task.root_uid)
+        root_uid = str(task.root_uid)
+        if target.platform_scan_id:
+            # The root of the analysis is kept: the tree is what says
+            # which tasks crashed, and it can only be read while the
+            # root uid is known.
+            self._analyses.setdefault(target.platform_scan_id, []).append(root_uid)
+        return root_uid
 
     # ------------------------------------------------------------------
     # Collecting
@@ -239,7 +343,56 @@ class KartonWorkerBridge:
         report = self.db.collection("reports").find_one({"_id": ObjectId(report_id)}) or {}
         results.findings = collect_from_report(report)
         results.services = services_from_report(report)
+        self._count_findings(target.platform_scan_id, results.findings)
         return results
+
+    def _count_findings(self, scan_id: str, findings: list[dict[str, Any]]) -> None:
+        """Count the findings every worker produced.
+
+        A finding names the report field it came from, and every field
+        belongs to one worker - so the findings of a scan are counted
+        per worker here rather than left in a pile.
+        """
+        if not scan_id:
+            return
+        counts = self._findings.setdefault(scan_id, {})
+        for finding in findings:
+            identity = worker_of_detector(str(finding.get("detector", "")))
+            if not identity:
+                continue
+            counts[identity] = counts.get(identity, 0) + 1
+
+    def _crashed_tasks(self, scan_id: str) -> dict[str, int]:
+        """How many tasks of the scan crashed, per worker.
+
+        The crashed tasks are read from the analysis tree of the scan:
+        the tree holds every task of the scan, and a task that crashed
+        names the consumer that took it.
+        """
+        roots = self._analyses.get(scan_id, [])
+        if not roots:
+            return {}
+        try:
+            from karton.core.inspect import KartonState
+
+            state = KartonState(self.producer.backend)
+        except Exception as exc:  # pragma: no cover - the backend may be down
+            log.debug("could not read the Karton state: %s", exc)
+            return {}
+
+        counts: dict[str, int] = {}
+        for root_uid in roots:
+            try:
+                analysis = state.get_analysis(root_uid)
+            except Exception as exc:  # pragma: no cover - the backend may blip
+                log.debug("could not read the Karton analysis %s: %s", root_uid, exc)
+                continue
+            for task in analysis.crashed_tasks:
+                identity = str(getattr(task, "headers", {}).get("receiver", "") or "")
+                if not identity:
+                    continue
+                counts[identity] = counts.get(identity, 0) + 1
+        return counts
 
     def _await_analysis(self, root_uid: str, *, deadline: float) -> None:
         """Wait until every task of the analysis tree is finished.

@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urlsplit
+
+from pymongo.errors import DuplicateKeyError
 
 from ..assets import ASSET_KINDS, extension_of, normalise_url
 
@@ -200,6 +203,106 @@ class AssetRepository:
         if not existing.get("extension") and extension:
             changes["extension"] = extension
         return changes
+
+
+class WorkerRunRepository:
+    """What every scanner worker did in one scan.
+
+    A worker that finds nothing writes nothing anywhere, so the platform
+    cannot tell "ran and found nothing" from "never ran" by looking at
+    the output.  This repository holds the facts that tell the two
+    apart: which workers were online when the scan started, how many
+    tasks each of them consumed, how many findings they produced and how
+    many of their tasks crashed.
+
+    The row is keyed by the scan and the worker, so a scan has one row
+    per worker however often the outcome is recorded.
+    """
+
+    def __init__(self, db: Any) -> None:
+        self._db = db
+
+    @property
+    def _col(self) -> Any:
+        return self._db.collection("platform_worker_runs")
+
+    def record(
+        self,
+        *,
+        scan_id: str,
+        worker: str,
+        tasks: int = 0,
+        findings: int = 0,
+        crashed_tasks: int = 0,
+        connected: bool = False,
+        expected_version: str = "",
+    ) -> dict[str, Any]:
+        """Record what one worker did in one scan.
+
+        The record is merged into the row that is already there: the
+        highest task count is kept - a snapshot taken before the work
+        must not lower the count the work produced - and the crashed
+        tasks are added, because a crash is an event rather than a
+        state.  A worker that was seen to be online stays connected.
+        """
+        name = str(worker or "").strip()
+        if not name:
+            return {}
+
+        now = time.time()
+        existing = self._col.find_one({"scan_id": scan_id, "worker": name})
+        if existing is None:
+            document = {
+                "scan_id": scan_id,
+                "worker": name,
+                "tasks": int(tasks),
+                "findings": int(findings),
+                "crashed_tasks": int(crashed_tasks),
+                "connected": bool(connected),
+                "expected_version": str(expected_version or ""),
+                "first_seen_at": now,
+                "last_seen_at": now,
+            }
+            try:
+                self._col.insert_one(dict(document))
+            except DuplicateKeyError:
+                # Another writer created the row first; the update below
+                # merges this record into it.
+                existing = self._col.find_one({"scan_id": scan_id, "worker": name})
+            else:
+                return document
+
+        changes: dict[str, Any] = {
+            "tasks": max(int(existing.get("tasks", 0) or 0), int(tasks)),
+            "findings": max(int(existing.get("findings", 0) or 0), int(findings)),
+            "crashed_tasks": int(existing.get("crashed_tasks", 0) or 0) + int(crashed_tasks),
+            "connected": bool(existing.get("connected")) or bool(connected),
+            "last_seen_at": now,
+        }
+        if expected_version and not existing.get("expected_version"):
+            changes["expected_version"] = str(expected_version)
+        self._col.update_one({"_id": existing["_id"]}, {"$set": changes})
+        document = {key: value for key, value in existing.items() if key != "_id"}
+        document.update(changes)
+        return document
+
+    def list_for_scan(self, scan_id: str) -> list[dict[str, Any]]:
+        """What every worker did in a scan, one row per worker."""
+        cursor = self._col.find({"scan_id": scan_id}).sort("worker", 1)
+        return [{key: value for key, value in document.items() if key != "_id"} for document in cursor]
+
+    def snapshot_connection(self, scan_id: str, identities: Sequence[str]) -> None:
+        """Record the workers that were online when the scan started.
+
+        A worker that was online but never dispatched a task is a
+        different fact from a worker that was not online at all, so the
+        snapshot is kept even when nothing else is known about it.
+        """
+        for identity in identities:
+            name = str(identity or "").strip()
+            if not name:
+                continue
+            self.record(scan_id=scan_id, worker=name, connected=True)
 
 
 def _host_of(url: str) -> str:
