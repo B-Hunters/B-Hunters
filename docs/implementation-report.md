@@ -4,9 +4,55 @@ This report describes what was built, what was verified, and what remains
 unfinished. Every number in it comes from a command that was run; nothing
 is estimated.
 
-**Date:** 2026-10-21
+**Date:** 2026-10-21 (this section updated 2026-10-29)
 **Branch:** `feature/ai-agent-platform` (from `main`)
 **Base:** `B-Hunters/B-Hunters` at `cb7033995c537705b2542871efddf8b009914d96`
+
+---
+
+## 0. The current baseline (2026-10-29)
+
+The work of 2026-10-21 is below. It has since been extended by the
+worker-output and agent-framework work of 2026-10-28, which is what the
+rest of this document describes.
+
+```
+$ pytest tests -q
+414 passed in 17.22s
+```
+
+| Suite | Tests | Needs |
+|---|---|---|
+| `tests/unit` | 221 | nothing |
+| `tests/security` | 91 | nothing |
+| `tests/integration` | 77 | MongoDB |
+| `tests/bench` | 25 | MongoDB for two of them |
+
+38 test modules, 6,732 lines. `ruff check b_hunters tests` and
+`ruff format --check b_hunters tests` are clean.
+
+`mypy b_hunters/platform --ignore-missing-imports --no-strict-optional`
+reports **36 errors in 14 files** — the agent framework and runtime
+modules. The job is wired into CI but has never been run to completion
+locally; it is Phase 6 work in the hardening plan.
+
+Since 2026-10-21 the platform has gained:
+
+* `platform_worker_output` — what each worker produced, saved per scan,
+  with a report that distinguishes a worker that ran and found nothing
+  from a worker that never ran;
+* `b_hunters/platform/scanners/karton_bridge.py` — the bridge that
+  dispatches to the seventeen Karton workers and reads back what they
+  wrote;
+* the PydanticAI agent framework, the runtime with its budgets, the
+  evidence shapes and the verdict recording;
+* `list_worker_output`, `scan_these_urls` and the other worker-output
+  tools, so the agents can read what the scanners found.
+
+The designs for what comes next are
+`docs/superpowers/specs/2026-10-29-single-operator-platform-design.md`
+and `docs/superpowers/specs/2026-10-29-asset-collection-and-reporting-design.md`,
+with plans beside them.
 
 ---
 

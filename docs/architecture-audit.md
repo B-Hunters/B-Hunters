@@ -13,6 +13,34 @@ Karton task contracts were verified against the installed
 `karton/core/karton.py`, `karton/core/inspect.py`) rather than inferred from
 the README. Repository metadata was cross-checked with the GitHub API.
 
+**Status, 2026-10-29.** This audit describes the organisation as it was
+before the platform was built. Most of its findings have since been
+closed — the API, the console, the scope enforcement, the agent runtime
+and the test suite all exist, and the audit's gap numbers no longer
+describe the repository. It is kept for the reasoning and the evidence.
+
+The gaps that are still open, with the evidence as measured on
+2026-10-29:
+
+| Gap | Still open? | Evidence |
+|---|---|---|
+| 3.1 No authentication, no API, no UI | Closed | `b_hunters/platform/api/`, `b_hunters/web/` |
+| 3.2 No tests anywhere | Closed | 414 tests in 38 modules |
+| 3.3 Failed tasks are silently swallowed | Partly | A failed task is still not visible per worker; the participation table is planned, not built |
+| 3.4 Private-address guard has gaps | Closed | `b_hunters/platform/security/scope.py` |
+| 3.6 Committed credentials | Open | `deploy/*.ini` still carries development credentials |
+| 3.7 Unpinned tooling | Open | The worker Dockerfiles are not pinned |
+| 3.8 The 69 MB binary | Open | `B-Hunters-xray` still commits it |
+| 3.13 No scope enforcement | Closed | Every outbound request goes through `ScopeEnforcer` |
+| 3.14 No agent runtime | Closed | `b_hunters/platform/agents/` |
+
+Three gaps this audit did not find, because they are properties of the
+platform rather than of the workers, are recorded in
+`docs/superpowers/specs/2026-10-29-asset-collection-and-reporting-design.md`
+§2: a scan runs in the API process and dies with it; nothing collects
+JavaScript URLs or images; and a tool that was cut off is
+indistinguishable from a tool that found nothing.
+
 ---
 
 ## 1. Existing architecture
