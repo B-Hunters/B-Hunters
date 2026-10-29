@@ -17,11 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shlex
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from ..gateway import ToolContext, ToolError, ToolPermissionError
 
@@ -103,12 +104,60 @@ def _split_command(command: str) -> list[str]:
     return parts
 
 
-def check_command(command: str, *, allowlist: Sequence[str], deny_patterns: Sequence[str]) -> list[str]:
-    """Validate a command line against the shell policy."""
+#: A URL in a command line.
+_URL_RE = re.compile(r"[a-z][a-z0-9+.-]*://(?P<host>[^/\s:\"']+)(?::(?P<port>\d+))?", re.I)
+
+#: An IPv4 address in a command line.
+_IP_RE = re.compile(r"(?<![\w.])(\d{1,3}(?:\.\d{1,3}){3})(?![\w.])")
+
+#: A name that looks like a host name.
+_NAME_RE = re.compile(r"(?<![\w./-])([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9-]+)+)(?![\w./-])", re.I)
+
+
+def _hosts_in(command: str, workspace: Optional[Path] = None) -> set[str]:
+    """The hosts a command names.
+
+    A name that is a file of the agent's own workspace is not a host:
+    ``python3 script.py`` must not be refused because ``script.py`` looks
+    like a domain name.
+    """
+    hosts: set[str] = set()
+    for match in _URL_RE.finditer(command):
+        hosts.add(match.group("host").lower())
+    for match in _IP_RE.finditer(command):
+        hosts.add(match.group(1))
+    for match in _NAME_RE.finditer(command):
+        token = match.group(1)
+        if workspace is not None and (workspace / token).exists():
+            continue
+        hosts.add(token.lower())
+    return hosts
+
+
+def check_command(
+    command: str,
+    *,
+    allowlist: Sequence[str],
+    deny_patterns: Sequence[str],
+    host_allowed: Optional[Callable[[str], bool]] = None,
+    workspace: Optional[Path] = None,
+) -> list[str]:
+    """Validate a command line against the shell policy.
+
+    A command that names a host outside the scan's scope is refused: the
+    shell can reach any host, and the scope is the platform's guarantee
+    about what may be touched.
+    """
     lowered = command.lower()
     for pattern in deny_patterns:
         if pattern.lower() in lowered:
             raise ToolPermissionError(f"the command contains the denied operation '{pattern.strip()}'")
+    if host_allowed is not None:
+        for host in _hosts_in(command, workspace):
+            if not host_allowed(host):
+                raise ToolPermissionError(
+                    f"the command names '{host}', which is outside the scope of this scan"
+                )
     parts = _split_command(command)
     program = os.path.basename(parts[0])
     if program not in allowlist:
@@ -127,9 +176,25 @@ async def run_command(
     """Run an allow-listed command inside the agent workspace."""
     allowlist = tuple(context.metadata.get("shell_allowlist", DEFAULT_ALLOWLIST))
     deny_patterns = tuple(context.metadata.get("shell_deny_patterns", DEFAULT_DENY_PATTERNS))
-    parts = check_command(command, allowlist=allowlist, deny_patterns=deny_patterns)
 
     workspace = await asyncio.to_thread(_prepare_workspace, context.workspace)
+
+    # The shell can reach any host, so a command that names one outside the
+    # scan's scope is refused: the scope is the platform's guarantee about
+    # what may be touched, and `http_request` is not the only way out.
+    scope = getattr(context, "scope", None)
+    policy = getattr(scope, "policy", None)
+    host_allowed = None
+    if policy is not None and getattr(policy, "authorized_hosts", ()):
+        host_allowed = policy.matches_host
+
+    parts = check_command(
+        command,
+        allowlist=allowlist,
+        deny_patterns=deny_patterns,
+        host_allowed=host_allowed,
+        workspace=workspace,
+    )
 
     env = {
         "PATH": "/usr/local/bin:/usr/bin:/bin",

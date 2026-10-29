@@ -6,6 +6,7 @@ from ..gateway import (
     CAPABILITY_NETWORK,
     CAPABILITY_READ,
     CAPABILITY_SHELL,
+    CAPABILITY_VERIFY,
     CAPABILITY_WRITE,
     ToolRegistry,
 )
@@ -23,13 +24,21 @@ from .scan import (
     LIST_ASSETS_SCHEMA,
     LIST_EVENTS_SCHEMA,
     LIST_FINDINGS_SCHEMA,
+    RECORD_VERDICT_SCHEMA,
+    RECORD_VERDICTS_SCHEMA,
     TOOL_HEALTH_SCHEMA,
     list_assets,
     list_events,
     list_findings,
     list_tool_health,
+    record_verdict,
+    record_verdicts,
 )
 from .shell import RUN_COMMAND_SCHEMA, run_command
+from .worker_output import (
+    LIST_WORKER_OUTPUT_SCHEMA,
+    list_worker_output,
+)
 
 __all__ = ["build_tool_registry"]
 
@@ -151,5 +160,39 @@ def build_tool_registry() -> ToolRegistry:
         list_tool_health,
         capabilities={CAPABILITY_READ},
         timeout=30.0,
+    )
+    registry.register(
+        "list_worker_output",
+        "List what the scanner workers produced for this scan: the URLs the crawlers "
+        "found, the paths the directory scanner found and the secrets the script "
+        "scanner read.",
+        LIST_WORKER_OUTPUT_SCHEMA,
+        list_worker_output,
+        capabilities={CAPABILITY_READ},
+        timeout=30.0,
+    )
+    registry.register(
+        "record_verdict",
+        "Record what the verification established about one finding: a verdict of "
+        "confirmed, likely, unverified, inconclusive or rejected, the severity it "
+        "supports and a note saying what was done to decide.",
+        RECORD_VERDICT_SCHEMA,
+        record_verdict,
+        capabilities={CAPABILITY_READ, CAPABILITY_VERIFY},
+        timeout=30.0,
+        safety_note="Only a role that holds the 'verify' capability may record a "
+        "verdict, and only for a finding of its own scan.",
+    )
+    registry.register(
+        "record_verdicts",
+        "Record what the verification established about many findings at once. Use it "
+        "after you have judged the findings: one call per finding leaves a judge with "
+        "fifty findings to judge without the budget to record them.",
+        RECORD_VERDICTS_SCHEMA,
+        record_verdicts,
+        capabilities={CAPABILITY_READ, CAPABILITY_VERIFY},
+        timeout=60.0,
+        safety_note="Only a role that holds the 'verify' capability may record a "
+        "verdict, and only for a finding of its own scan.",
     )
     return registry

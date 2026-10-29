@@ -11,8 +11,16 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 
-from ...agents.orchestrator import ScanContext, ScanOrchestrator, ScanProfile
+from ...agents.orchestrator import (
+    REPORTING_ROLES,
+    VERIFICATION_ROLES,
+    ScanContext,
+    ScanOrchestrator,
+    ScanProfile,
+    agent_roles_for,
+)
 from ...agents.provider import ProviderConfig
+from ...scanners import worker_output
 from ...security.scope import ScopeEnforcer, build_policy_from_scan
 from ..deps import (
     CurrentUser,
@@ -56,6 +64,10 @@ class ScanRequestModel(BaseModel):
     allow_state_changing: bool = False
     test_environment: bool = False
     provider: str = Field(default="", max_length=128)
+    #: Whether this scan runs the independent verifier.  ``None`` follows
+    #: the platform's setting; ``True`` or ``False`` decide it for this
+    #: scan alone.
+    independent_verifier: Optional[bool] = None
 
     @field_validator("name")
     @classmethod
@@ -177,7 +189,18 @@ def _validate_scope(
     }
 
 
-def _profile_for(name: str, overrides: dict[str, Any]) -> ScanProfile:
+def _profile_for(
+    name: str,
+    overrides: dict[str, Any],
+    *,
+    verification_enabled: bool = False,
+) -> ScanProfile:
+    """The profile of a scan.
+
+    The independent verifier is opt-in.  It re-checks every candidate
+    finding, which costs a request each, so it is left out unless the
+    platform is configured to run it or the scan names the role itself.
+    """
     if name == "recon":
         profile = ScanProfile.reconnaissance_only()
     else:
@@ -188,6 +211,20 @@ def _profile_for(name: str, overrides: dict[str, Any]) -> ScanProfile:
             continue
         if hasattr(profile, key):
             setattr(profile, key, value)
+    # The reporting role always runs: it reconciles the findings and
+    # records a verdict for each of them.  The independent verifier is
+    # opt-in - it re-checks every candidate finding, which costs a
+    # request each - so it is left out unless the platform is configured
+    # to run it or the scan names the role itself.
+    roles = list(profile.agent_roles)
+    for role in REPORTING_ROLES:
+        if role not in roles:
+            roles.append(role)
+    if verification_enabled:
+        for role in VERIFICATION_ROLES:
+            if role not in roles:
+                roles.append(role)
+    profile.agent_roles = roles
     return profile
 
 
@@ -249,6 +286,11 @@ async def preview_scan(
             "allow_state_changing": payload.allow_state_changing,
             "safe_mode": payload.safe_mode,
         },
+        verification_enabled=(
+            payload.independent_verifier
+            if payload.independent_verifier is not None
+            else services.settings.agent_verification_enabled
+        ),
     )
     known_scanners = {spec.name for spec in services.scanner_registry_specs()}
     unknown = [name for name in profile.scanners if name not in known_scanners]
@@ -261,6 +303,7 @@ async def preview_scan(
         "agent_roles": profile.agent_roles,
         "scanners": profile.scanners,
         "unknown_scanners": unknown,
+        "independent_verifier": "verifier" in profile.agent_roles,
         "max_duration_seconds": profile.max_duration_seconds,
         "safe_mode": profile.safe_mode,
         "warnings": _preview_warnings(profile, unknown, result),
@@ -341,6 +384,11 @@ async def create_scan(
             "allow_state_changing": payload.allow_state_changing,
             "safe_mode": payload.safe_mode,
         },
+        verification_enabled=(
+            payload.independent_verifier
+            if payload.independent_verifier is not None
+            else services.settings.agent_verification_enabled
+        ),
     )
 
     definition = {
@@ -452,6 +500,9 @@ async def start_scan(
     definition = scan.definition or {}
     profile_data = definition.get("profile") or {}
     profile = ScanProfile.from_dict(profile_data) if profile_data else ScanProfile.default()
+    if not profile_data and services.settings.agent_verification_enabled:
+        profile.agent_roles = agent_roles_for(profile, verification_enabled=True)
+
     context = ScanContext(
         scan_id=scan_id,
         name=scan.name,
@@ -501,6 +552,7 @@ def _build_orchestrator(services: Services) -> ScanOrchestrator:
     from ...agents.provider import Provider
     from ...scanners.fingerprint_adapter import service_fingerprint_executor
     from ...scanners.graphql_adapter import graphql_analysis_executor
+    from ...scanners.karton_bridge import build_worker_bridge
     from ...scanners.native import (
         dependency_analysis_executor,
         openapi_discovery_executor,
@@ -533,6 +585,7 @@ def _build_orchestrator(services: Services) -> ScanOrchestrator:
         provider_factory=provider_factory,
         tool_registry=build_tool_registry(),
         scanner_registry=registry,
+        worker_bridge=build_worker_bridge(settings=services.settings, database=services.db),
     )
 
 
@@ -732,6 +785,117 @@ async def scan_services(
         "scan_id": scan_id,
         "urls": documents,
         "summary": services.services.summary(scan_id),
+    }
+
+
+@router.get("/{scan_id}/scanners")
+async def scan_scanners(
+    scan_id: str,
+    user: CurrentUser = Depends(current_user),
+    services: Services = Depends(get_services),
+) -> dict[str, Any]:
+    """What every scanner worker did, and what it found.
+
+    The console scan starts seventeen worker containers at once, so a
+    worker that finds nothing and a worker that never ran look the same.
+    This answers the difference: the task counters say which workers
+    took part, and the documents they wrote say what they found.
+    """
+    scan = services.scans.get(scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="the scan does not exist")
+
+    participation = dict(scan.workers or {})
+    live = _live_worker_tasks(services)
+    connected = _connected_workers(services)
+
+    # While the scan runs, the participation is not recorded yet.  The
+    # counters from before the scan say which workers took part in it.
+    if not participation:
+        before = scan.workers_before or {}
+        participation = {
+            identity: count - int(before.get(identity, 0))
+            for identity, count in live.items()
+            if count - int(before.get(identity, 0)) > 0
+        }
+
+    report = worker_output.scanner_report(
+        services.db,
+        scan_id,
+        participation=participation,
+        live=live,
+        connected=connected,
+    )
+    report["participation"] = participation
+    return report
+
+
+def _live_worker_tasks(services: Services) -> dict[str, int]:
+    """How many tasks each worker has consumed, over every scan.
+
+    The per-scan counters are written when the scan ends, so during a
+    scan this is the only view of who is working.
+    """
+    try:
+        from karton.core import Config, Producer
+
+        producer = Producer(
+            config=Config(path=services.settings.karton_config_path),
+            identity=services.settings.karton_identity,
+        )
+        raw = producer.backend.redis.hgetall("karton.metrics.consumed")
+    except Exception:  # pragma: no cover - the backend may be down
+        return {}
+    counts: dict[str, int] = {}
+    for identity, value in (raw or {}).items():
+        name = identity.decode() if isinstance(identity, bytes) else str(identity)
+        try:
+            counts[name] = int(value)
+        except (TypeError, ValueError):
+            continue
+    return counts
+
+
+def _connected_workers(services: Services) -> list[str]:
+    """The workers that are bound to the task router right now."""
+    try:
+        from karton.core import Config, Producer
+        from karton.core.inspect import KartonState
+
+        producer = Producer(
+            config=Config(path=services.settings.karton_config_path),
+            identity=services.settings.karton_identity,
+        )
+        return sorted(KartonState(producer.backend).queues.keys())
+    except Exception:  # pragma: no cover - the backend may be down
+        return []
+
+
+@router.get("/{scan_id}/worker-output")
+async def scan_worker_output(
+    scan_id: str,
+    worker: str = "",
+    kind: str = "",
+    limit: int = 500,
+    user: CurrentUser = Depends(current_user),
+    services: Services = Depends(get_services),
+) -> dict[str, Any]:
+    """What the scanner workers produced, saved per scan.
+
+    The console lists it and offers to scan it again; an agent reads it
+    with the `list_worker_output` tool.
+    """
+    if services.scans.get(scan_id) is None:
+        raise HTTPException(status_code=404, detail="the scan does not exist")
+    items = [
+        {key: value for key, value in item.items() if key != "_id"}
+        for item in services.worker_output.list_for_scan(scan_id, worker=worker, kind=kind, limit=limit)
+    ]
+    return {
+        "scan_id": scan_id,
+        "items": items,
+        "count": len(items),
+        "counts": services.worker_output.counts_for_scan(scan_id),
     }
 
 

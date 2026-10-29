@@ -21,9 +21,21 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from pydantic_ai import Agent
+from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.messages import TextPart
+from pydantic_ai.usage import UsageLimits
+
 from ..tools.gateway import ToolContext, ToolGateway, ToolResult
 from .compat import build_compat_instruction, merge_native_and_compat
-from .provider import ChatMessage, Completion, Provider, ProviderError, ToolCall
+from .framework import (
+    Conclusion,
+    ProviderModel,
+    build_tools,
+    conclusion_from_text,
+    normalise_conclusion,
+)
+from .provider import Completion, Provider, ProviderError, ToolCall
 from .roles import AgentRole, role_prompt
 from .schemas import (
     AgentMessage,
@@ -57,6 +69,41 @@ class AgentRuntimeConfig:
     temperature: float = 0.0
     #: Whether the model is asked to return structured JSON.
     structured_output: bool = True
+
+
+def _wrap_up_message(*, rounds: int, tool_calls: int, tokens: int, budget: Budget) -> str | None:
+    """What to tell the role before its budget runs out.
+
+    A model gets one answer per round.  A role that is asked to record
+    what it found and to conclude in the same round records it and ends
+    the round without a conclusion - so the recording is asked for a few
+    rounds before the end, and the conclusion in the last one.
+    """
+    if tool_calls >= budget.max_tool_calls:
+        return "Tool call budget exhausted. Produce your final JSON answer now."
+    if rounds >= budget.max_rounds - 1:
+        return (
+            "This is your last round. Do not call any tool. Summarise what you "
+            "found and produce your final JSON answer now."
+        )
+    if rounds >= max(1, budget.max_rounds - 3):
+        return (
+            "You have few rounds left. If your role has a tool for recording what you found, record it now."
+        )
+    if tool_calls >= budget.max_tool_calls * 0.8:
+        return (
+            "You are close to your tool call budget. If your role has a tool "
+            "for recording what you found, record it now."
+        )
+    if tokens >= budget.max_tokens * 0.8:
+        # The tokens are what a reasoning model spends, so a role that is
+        # cut off here loses everything it found.  It is told to stop
+        # working and to answer.
+        return (
+            "You are close to your token budget. Do not call any tool any more. "
+            "Summarise what you have found and produce your final JSON answer now."
+        )
+    return None
 
 
 @dataclass
@@ -95,220 +142,311 @@ class AgentRuntime:
             max_wall_clock_seconds=self.config.max_wall_clock_seconds,
         )
         ctx = context or ToolContext(scan_id=scan_id, task_id=task_id, role=self.role.role)
+        if not ctx.permissions.capabilities and not ctx.permissions.tools:
+            # A context that carries no permissions of its own takes the
+            # role's: the role knows what it may do.
+            ctx.permissions = self.role.permissions
+        if not ctx.allowed_tools and self.role.tools:
+            # The same for the tools: the role's own list is what the
+            # role may use.
+            ctx.allowed_tools = set(self.role.tools)
         ctx.budget = budget
 
+        # The role is offered the tools it may use, and only those.  It
+        # was offered every tool of the registry, so the gateway refused
+        # the ones it may not have - and a model does not learn from a
+        # refusal: it kept reaching for `record_verdict` and for the
+        # network tools, spending the rounds it needed for its own work
+        # on calls that could never succeed.
         definitions = self.gateway.registry.for_role(self.role.role, ctx.allowed_tools)
-        tools = [d.to_openai() for d in definitions]
+        tool_records: list[dict[str, Any]] = []
+        tools = build_tools(
+            definitions,
+            ctx,
+            self.gateway,
+            records=tool_records,
+            max_identical_calls=self.config.max_identical_calls,
+        )
 
-        messages: list[dict[str, Any]] = [{"role": "system", "content": role_prompt(self.role)}]
+        system_prompt = role_prompt(self.role)
         if definitions and not (await self._native_tools_enabled()):
-            messages[0]["content"] += "\n\n" + build_compat_instruction(definitions)
-        if input_payload:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": "Task context:\n" + json.dumps(input_payload, indent=2, default=str)[:20000],
-                }
-            )
+            system_prompt += "\n\n" + build_compat_instruction(definitions)
+
         prompt_parts = [f"Objective: {objective}"]
         if target:
             prompt_parts.append(f"Target asset: {target}")
         prompt_parts.append(
-            "Work step by step using the tools you need, then produce your final answer "
-            "as a JSON object with the keys: conclusion, confidence, observations, "
-            "uncertainty, next_step, findings (and optionally delegate)."
+            "Work step by step using the tools you need, then give your final answer by "
+            "calling the `final_result` tool with these keys: conclusion, confidence, "
+            "observations, uncertainty, next_step, findings (and optionally delegate). "
+            "Do not write the answer as text: the tool call is what carries it."
         )
-        messages.append({"role": "user", "content": "\n".join(prompt_parts)})
-
-        for prior in prior_messages[-6:]:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": f"[{prior.sender_role}] {prior.kind.value}: {prior.hypothesis}",
-                }
+        if "record_verdict" not in self.role.tools:
+            # The model keeps reaching for `record_verdict` - it is the
+            # obvious name for "say what you think of this finding" - and
+            # every attempt is refused, because only the adjudicator (and
+            # the optional verifier) may judge a finding.  Saying so
+            # saves the rounds it spends on the refusals.
+            prompt_parts.append(
+                "You do not judge findings and you do not record verdicts: the "
+                "adjudicator does that after you are done. Do not call "
+                "`record_verdict`. Put everything you concluded into the "
+                "`final_result` tool, in the `findings` list."
             )
+        prompt = "\n".join(prompt_parts)
+        if input_payload:
+            prompt = (
+                "Task context:\n" + json.dumps(input_payload, indent=2, default=str)[:20000] + "\n\n" + prompt
+            )
+        for prior in prior_messages[-6:]:
+            prompt += f"\n\n[{prior.sender_role}] {prior.kind.value}: {prior.hypothesis}"
 
         run = AgentRun(task_id=task_id, role=self.role.role)
         tokens_used = 0
         tool_calls_used = 0
         rounds = 0
-        seen_calls: dict[str, int] = {}
-        transcript: list[ChatMessage] = []
+        last_text = ""
+        state = {"requests": 0, "rounds": 0, "tool_calls": 0, "tokens": 0}
 
-        while True:
-            elapsed = time.monotonic() - started
-            exhausted = budget.exhausted(
-                tokens_used=tokens_used,
-                tool_calls=tool_calls_used,
-                rounds=rounds,
-                elapsed=elapsed,
+        def _nudge(request_number: int) -> str | None:
+            # The nudge counts the requests, not the rounds that were
+            # finished: the budget limits the requests, so the "this is
+            # your last round, conclude now" has to arrive with the last
+            # request that is still allowed.  The number is the one the
+            # adapter counts, so the two cannot drift apart.
+            return _wrap_up_message(
+                rounds=request_number,
+                tool_calls=state["tool_calls"],
+                tokens=state["tokens"],
+                budget=budget,
             )
-            if exhausted:
-                run.status = "budget_exhausted"
-                run.error = exhausted
-                self._emit(
-                    AgentMessage(
-                        scan_id=scan_id,
-                        task_id=task_id,
-                        sender_role=self.role.role,
-                        kind=MessageKind.BUDGET_EXHAUSTED,
-                        hypothesis=exhausted,
-                        disposition=Disposition.BLOCKED,
-                        rationale=f"run stopped: {exhausted}",
-                    )
-                )
-                break
 
-            rounds += 1
-            try:
-                completion = await self._complete(messages, tools, definitions)
-            except ProviderError as exc:
-                run.status = "failed"
-                run.error = exc.message
-                self._emit(
-                    AgentMessage(
-                        scan_id=scan_id,
-                        task_id=task_id,
-                        sender_role=self.role.role,
-                        kind=MessageKind.ERROR,
-                        hypothesis=exc.message,
-                        disposition=Disposition.BLOCKED,
-                        rationale="the model provider returned an error",
-                    )
-                )
-                break
+        model = ProviderModel(
+            self.provider,
+            role=self.role.role,
+            temperature=self.config.temperature,
+            max_output_tokens=self.provider.config.max_output_tokens,
+            native_tools=await self._native_tools_enabled(),
+            nudge=_nudge,
+            # From the request that carries the "this is your last
+            # round" instruction onwards, the role is offered no tools:
+            # it has to answer there, and it cannot spend another round
+            # and lose everything it found.
+            function_tools_until=max(1, budget.max_rounds - 2),
+        )
+        limits = UsageLimits(
+            # One request beyond the budget: the last one carries the
+            # instruction to conclude, and a conclusion is a request too.
+            request_limit=budget.max_rounds + 1,
+            tool_calls_limit=budget.max_tool_calls,
+            total_tokens_limit=budget.max_tokens,
+        )
 
-            tokens_used += completion.total_tokens
-            transcript.append(completion.message)
+        agent = Agent(
+            model,
+            tools=tools,
+            output_type=Conclusion,
+            # A conclusion that does not fit the schema is worth a few
+            # more attempts: it is the difference between a role that
+            # reports and a role that is cut off.
+            retries=3,
+            system_prompt=system_prompt,
+        )
 
-            if self.on_progress:
-                self.on_progress(
-                    {
-                        "role": self.role.role,
-                        "round": rounds,
-                        "tokens_used": tokens_used,
-                        "tool_calls_used": tool_calls_used,
-                        "latency_ms": completion.latency_ms,
-                    }
-                )
-
-            if not completion.message.tool_calls:
-                conclusion = self._parse_conclusion(completion.message.content)
-                run.conclusion = conclusion.get("conclusion", completion.message.content.strip()[:4000])
-                run.confidence = _confidence(conclusion.get("confidence"))
-                run.observations = list(conclusion.get("observations") or [])
-                run.next_step = str(conclusion.get("next_step") or "")
-                run.uncertainty = str(conclusion.get("uncertainty") or "")
-                run.findings = list(conclusion.get("findings") or [])
-                run.status = "succeeded"
-                run.disposition = Disposition.DELEGATE if conclusion.get("delegate") else Disposition.COMPLETE
-                if conclusion.get("delegate"):
-                    run.next_step = json.dumps(conclusion["delegate"])
-                break
-
-            # --- execute the requested tools ----------------------------
-            assistant_payload = completion.message.to_openai()
-            messages.append(assistant_payload)
-
-            for call in completion.message.tool_calls:
-                if tool_calls_used >= budget.max_tool_calls:
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": "Tool call budget exhausted. Produce your final JSON answer now.",
-                        }
-                    )
-                    break
-
-                signature = f"{call.name}:{json.dumps(call.arguments, sort_keys=True, default=str)}"
-                seen_calls[signature] = seen_calls.get(signature, 0) + 1
-                if seen_calls[signature] > self.config.max_identical_calls:
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": (
-                                f"Tool '{call.name}' was already called with these exact arguments. "
-                                "Change your approach or produce your final JSON answer."
-                            ),
-                        }
-                    )
-                    continue
-
-                tool_calls_used += 1
-                result = await self.gateway.execute(
-                    tool_name=call.name,
-                    arguments=call.arguments,
-                    context=ctx,
-                    call_id=call.id,
-                )
-                run.tool_calls.append(
-                    {
-                        "tool": call.name,
-                        "arguments": call.arguments,
-                        "ok": result.ok,
-                        "error": result.error,
-                        "duration_ms": result.duration_ms,
-                        "output": str(result.output)[:4000],
-                    }
-                )
-                if self.on_tool_call:
-                    self.on_tool_call(
-                        {
-                            "scan_id": scan_id,
-                            "task_id": task_id,
-                            "agent_role": self.role.role,
-                            "tool": call.name,
-                            "call_id": call.id,
-                            "status": "ok" if result.ok else "error",
-                            "arguments": call.arguments,
-                            "output": str(result.output)[:2000],
-                            "error": result.error,
-                            "duration_ms": result.duration_ms,
-                            "at": time.time(),
-                        }
-                    )
-
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": _format_tool_result(call, result),
-                    }
-                )
-
-                self._emit(
-                    AgentMessage(
-                        scan_id=scan_id,
-                        task_id=task_id,
-                        sender_role=self.role.role,
-                        kind=MessageKind.OBSERVATION,
-                        target=call.name,
-                        hypothesis=_summarise_tool_result(result),
-                        observations=[f"{call.name} -> {'ok' if result.ok else 'error'}"],
-                        confidence=Confidence.LOW,
-                        evidence=[
-                            EvidenceRef(
-                                kind="tool_output",
-                                reference=f"tool:{call.name}",
-                                excerpt=str(result.output)[:1500],
+        try:
+            async with agent.iter(
+                prompt,
+                deps=ctx,
+                usage_limits=limits,
+                timeout=budget.max_wall_clock_seconds,
+            ) as iteration:
+                async for node in iteration:
+                    # The last thing the model said in prose.  A model
+                    # that answers with text instead of filling in the
+                    # answer tool still knows what it found, and that
+                    # text is read as its conclusion below.  The response
+                    # is attached to the node that follows the request,
+                    # so every node is looked at.
+                    said = _node_text(node)
+                    if said:
+                        last_text = said
+                    if Agent.is_model_request_node(node):
+                        rounds += 1
+                        # The framework counts the requests itself, and
+                        # its count is the one the budget limits.  Asking
+                        # it keeps the nudge and the limit in step: the
+                        # "this is your last round, conclude now" has to
+                        # arrive with the last request that is still
+                        # allowed.
+                        state["requests"] = model.request_count + 1
+                        state["tool_calls"] = len(tool_records)
+                        state["tokens"] = model.total_tokens
+                        if self.on_progress:
+                            self.on_progress(
+                                {
+                                    "role": self.role.role,
+                                    "round": rounds,
+                                    "tokens_used": tokens_used,
+                                    "tool_calls_used": tool_calls_used,
+                                    "latency_ms": 0,
+                                }
                             )
-                        ],
-                        proposed_next_step="continue investigation",
-                        rationale=f"called tool '{call.name}'",
-                    )
+                    elif Agent.is_call_tools_node(node):
+                        # The round is finished: the tools ran and the
+                        # answers are in.  The nudge counts the rounds
+                        # that are done, not the ones that are prepared.
+                        state["rounds"] = rounds
+                    elif Agent.is_end_node(node):
+                        conclusion = normalise_conclusion(node.data.output)
+                        run.conclusion = conclusion["conclusion"]
+                        run.confidence = _confidence(conclusion["confidence"])
+                        run.observations = list(conclusion["observations"])
+                        run.next_step = str(conclusion["next_step"] or "")
+                        run.uncertainty = str(conclusion["uncertainty"] or "")
+                        run.findings = list(conclusion["findings"])
+                        run.status = "succeeded"
+                        run.disposition = (
+                            Disposition.DELEGATE if conclusion["delegate"] else Disposition.COMPLETE
+                        )
+                        if conclusion["delegate"]:
+                            run.next_step = json.dumps(conclusion["delegate"])
+                        self._emit(
+                            AgentMessage(
+                                scan_id=scan_id,
+                                task_id=task_id,
+                                sender_role=self.role.role,
+                                kind=MessageKind.TASK_RESULT,
+                                target=target,
+                                hypothesis=run.conclusion,
+                                observations=run.observations,
+                                evidence=_evidence_refs(run.findings),
+                                proposed_next_step=run.next_step,
+                                uncertainty=run.uncertainty,
+                                confidence=run.confidence,
+                                disposition=run.disposition,
+                                rationale=(
+                                    f"the role finished after {rounds} round(s) and "
+                                    f"{len(tool_records)} tool call(s), with "
+                                    f"{len(run.findings)} proposed finding(s)"
+                                ),
+                            )
+                        )
+        except UsageLimitExceeded as exc:
+            run.status = "budget_exhausted"
+            run.error = (
+                "the role ran out of rounds before it concluded: "
+                f"{budget.max_rounds} round(s) were not enough"
+            )
+            log.info("the budget of %s ran out: %s", self.role.role, exc)
+            self._emit(
+                AgentMessage(
+                    scan_id=scan_id,
+                    task_id=task_id,
+                    sender_role=self.role.role,
+                    kind=MessageKind.BUDGET_EXHAUSTED,
+                    hypothesis=str(exc),
+                    disposition=Disposition.BLOCKED,
+                    rationale=f"run stopped: {exc}",
                 )
+            )
+        except Exception as exc:
+            run.status = "failed"
+            run.error = str(exc)
+            self._emit(
+                AgentMessage(
+                    scan_id=scan_id,
+                    task_id=task_id,
+                    sender_role=self.role.role,
+                    kind=MessageKind.ERROR,
+                    hypothesis=str(exc),
+                    disposition=Disposition.BLOCKED,
+                    rationale="the run ended with an error",
+                )
+            )
 
-            if tool_calls_used >= budget.max_tool_calls:
-                messages.append(
+        # The tool calls the run made, with what each of them returned.
+        for record in tool_records:
+            tool_calls_used += 1
+            run.tool_calls.append(record)
+            if self.on_tool_call:
+                self.on_tool_call(
                     {
-                        "role": "user",
-                        "content": "Tool call budget exhausted. Produce your final JSON answer now.",
+                        "scan_id": scan_id,
+                        "task_id": task_id,
+                        "agent_role": self.role.role,
+                        "tool": record.get("tool", ""),
+                        "call_id": record.get("call_id", ""),
+                        "status": "ok" if record.get("ok") else "error",
+                        "arguments": record.get("arguments", {}),
+                        "output": str(record.get("output", ""))[:2000],
+                        "error": record.get("error", ""),
+                        "duration_ms": record.get("duration_ms", 0),
+                        "at": time.time(),
                     }
                 )
+            self._emit(
+                AgentMessage(
+                    scan_id=scan_id,
+                    task_id=task_id,
+                    sender_role=self.role.role,
+                    kind=MessageKind.OBSERVATION,
+                    target=str(record.get("tool", "")),
+                    hypothesis=str(record.get("output", ""))[:1500],
+                    observations=[f"{record.get('tool', '')} -> {'ok' if record.get('ok') else 'error'}"],
+                    confidence=Confidence.LOW,
+                    evidence=[
+                        EvidenceRef(
+                            kind="tool_output",
+                            reference=f"tool:{record.get('tool', '')}",
+                            excerpt=str(record.get("output", ""))[:1500],
+                        )
+                    ],
+                    proposed_next_step="continue investigation",
+                    rationale=f"called tool '{record.get('tool', '')}'",
+                )
+            )
 
-        run.tokens_used = tokens_used
+        run.tokens_used = model.total_tokens
         run.tool_calls_used = tool_calls_used
         run.rounds = rounds
         run.duration_seconds = round(time.monotonic() - started, 3)
+        if not run.conclusion and last_text.strip() and _answer_shaped_failure(run):
+            # The role answered with prose instead of filling in the
+            # answer tool.  Its answer is read as its conclusion: the
+            # work it did is not thrown away because the answer came in
+            # the wrong shape.  A run that failed for another reason -
+            # a provider that is down, a tool that hung - keeps its
+            # failure: the prose before it is not the role's conclusion.
+            conclusion = normalise_conclusion(conclusion_from_text(last_text))
+            if conclusion["conclusion"]:
+                run.conclusion = conclusion["conclusion"]
+                run.confidence = _confidence(conclusion["confidence"])
+                run.observations = list(conclusion["observations"])
+                run.next_step = str(conclusion["next_step"] or "")
+                run.uncertainty = str(conclusion["uncertainty"] or "")
+                run.findings = list(conclusion["findings"])
+                run.status = "succeeded"
+                run.error = ""
+                self._emit(
+                    AgentMessage(
+                        scan_id=scan_id,
+                        task_id=task_id,
+                        sender_role=self.role.role,
+                        kind=MessageKind.TASK_RESULT,
+                        target=target,
+                        hypothesis=run.conclusion,
+                        observations=run.observations,
+                        evidence=_evidence_refs(run.findings),
+                        proposed_next_step=run.next_step,
+                        uncertainty=run.uncertainty,
+                        confidence=run.confidence,
+                        disposition=Disposition.COMPLETE,
+                        rationale=(
+                            "the role answered in prose; the answer was read "
+                            f"as its conclusion after {rounds} round(s)"
+                        ),
+                    )
+                )
         if run.status == "succeeded" and not run.conclusion:
             run.status = "failed"
             run.error = run.error or "the agent produced no conclusion"
@@ -356,6 +494,69 @@ class AgentRuntime:
             self.on_message(message)
         except Exception:  # pragma: no cover - persistence must not break the run
             log.exception("failed to persist an agent message")
+
+
+#: The failures that mean "the role did not deliver its answer", as
+#: opposed to "the run broke".  Only the first kind may be answered with
+#: the prose the model wrote.
+ANSWER_SHAPED_FAILURES = (
+    "no conclusion",
+    "output retries",
+    "ran out of rounds",
+)
+
+
+def _answer_shaped_failure(run: Any) -> bool:
+    """Did the run fail because the answer never arrived?
+
+    A provider that is down, a tool that hung and a refusal are
+    failures of the run, not of the answer: the prose the model wrote
+    before them is not its conclusion.
+    """
+    if run.status == "succeeded":
+        return True
+    error = str(run.error or "")
+    return any(marker in error for marker in ANSWER_SHAPED_FAILURES)
+
+
+def _node_text(node: Any) -> str:
+    """The prose a model wrote in one request.
+
+    The framework keeps the answer of a request in the node; the text
+    parts of it are what the model said in words.
+    """
+    response = getattr(node, "model_response", None)
+    if response is None:
+        return ""
+    parts = getattr(response, "parts", None) or ()
+    texts = [part.content for part in parts if isinstance(part, TextPart)]
+    return "\n".join(text for text in texts if text).strip()
+
+
+def _evidence_refs(findings: Sequence[Any]) -> list[EvidenceRef]:
+    """The evidence a role attached to the findings it proposed.
+
+    The model writes the evidence in whatever shape it likes, so every
+    entry is read defensively: a finding that names a source, a snippet
+    of what it saw and where it saw it.
+    """
+    refs: list[EvidenceRef] = []
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        title = str(finding.get("title") or "")
+        for item in finding.get("evidence") or []:
+            if isinstance(item, dict):
+                refs.append(
+                    EvidenceRef(
+                        kind=str(item.get("kind") or "note"),
+                        reference=str(item.get("reference") or title),
+                        excerpt=str(item.get("excerpt") or ""),
+                    )
+                )
+            elif isinstance(item, str):
+                refs.append(EvidenceRef(kind="note", reference=title, excerpt=item))
+    return refs
 
 
 def _format_tool_result(call: ToolCall, result: ToolResult) -> str:

@@ -89,10 +89,21 @@ tailscale status | grep bhunter
 The console is at the MagicDNS name:
 
 ```
-http://bhunter.tail057c15.ts.net:8080
+http://bhunter
 ```
 
-The API documentation is at `http://bhunter.tail057c15.ts.net:8080/api/docs`.
+The API documentation is at `http://bhunter/api/docs`.
+
+The Karton dashboard is a second tailnet node, named `karton-dashboard`.
+It shows which services are connected to the task router, what each of
+them binds to, and the tasks that are pending or crashed:
+
+```
+http://karton-dashboard
+```
+
+It has no authentication and it can restart and cancel tasks, so it is
+published on the tailnet and on the loopback interface of the host only.
 
 Create the first administrator:
 
@@ -146,7 +157,7 @@ docker logs -f bhunter_platform
 docker logs -f bhunter_ts
 
 # The live queue state (through the API).
-curl -s -b cookies.txt http://bhunter.tail057c15.ts.net:8080/api/v1/karton/state | jq .totals
+curl -s -b cookies.txt http://bhunter/api/v1/karton/state | jq .totals
 ```
 
 The *Karton & workers* page of the console shows the same state.

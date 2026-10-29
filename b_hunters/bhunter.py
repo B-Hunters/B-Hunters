@@ -180,13 +180,30 @@ class BHunters(Karton):
                 trials-=1
                 if trials>0:
                     time.sleep(10)
+    #: The MIME types a server may use for a JavaScript file.  The
+    #: ``application/javascript`` type was never registered and RFC 9239
+    #: obsoleted it in favour of ``text/javascript``; Flask, Werkzeug and
+    #: most modern servers send the latter.
+    JS_CONTENT_TYPES = (
+        "application/javascript",
+        "text/javascript",
+        "application/x-javascript",
+        "application/ecmascript",
+        "text/ecmascript",
+    )
+
     def checkjs(self,url):
+        """Is the URL a JavaScript file?
+
+        The check is on the media type, not on the file name: a ``.js``
+        URL served as ``text/html`` is not a script, and a script served
+        with a name the crawler happened not to keep is.
+        """
         try:
             response = requests.get(url,timeout=10)
-            if "Content-Type" in response.headers and response.headers["Content-Type"].startswith("application/javascript"):
-                return True
-            else:
-                return False
+            content_type = response.headers.get("Content-Type","")
+            media_type = content_type.split(";")[0].strip().lower()
+            return media_type in self.JS_CONTENT_TYPES
         except Exception:
             return False
 
@@ -231,6 +248,36 @@ class BHunters(Karton):
             self.db=self.monogocon()
         raise Exception("MongoDB is not available after 10 tries.")
 
+    @staticmethod
+    def is_on_target(subdomain, link):
+        """Is the link part of the target?
+
+        A crawler collects the third-party links of a page as well: a page
+        that links to youtube.com or google.com makes the crawler record
+        those, and a scanner that is handed the raw list probes the
+        third-party hosts instead of the target.  The comparison ignores
+        the scheme and the path, and it takes the port into account,
+        because the target is named as host:port.
+        """
+        if not link:
+            return False
+        target_host, _, target_port = (subdomain or "").partition(":")
+        target_host = target_host.lower()
+
+        candidate = str(link).strip()
+        if "://" in candidate:
+            candidate = candidate.split("://", 1)[1]
+        candidate = candidate.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+        if "@" in candidate:
+            candidate = candidate.rsplit("@", 1)[1]
+        host, _, port = candidate.partition(":")
+
+        if host.lower() != target_host:
+            return False
+        if target_port and port != target_port:
+            return False
+        return True
+
     def checklinksexist(self,subdomain,links):
         missing_links=[]
         if links =="":
@@ -238,21 +285,37 @@ class BHunters(Karton):
         if isinstance(links,str):
             links=links.splitlines()
 
+        # Only the target itself is scanned.  A link to a third-party host
+        # is not a finding of the target, and probing it spends the
+        # scanner's budget on somebody else's website.
+        links = [link for link in links if self.is_on_target(subdomain, link)]
+        if not links:
+            return []
+
         self.waitformongo()
         collection=self.db["domains"]
-        existing_document = collection.find_one({"Domain": subdomain})
 
+        # The record of what has been checked belongs to the scan, not to
+        # the host.  A host can have several scans - the laboratory is
+        # scanned again and again - and a host-keyed record makes the
+        # second scan skip the URLs it has never tested.
+        scanid = getattr(self,"scanid","") or ""
+        if not scanid:
+            existing_document = collection.find_one({"Domain": subdomain})
+            if existing_document is None:
+                self.log.error("No document found for the specified domain.")
+                return []
+            scanid = existing_document["Scanid"]
+
+        collection=self.db["scans"]
+        existing_document = collection.find_one({"_id": ObjectId(scanid)})
         if existing_document is None:
-            self.log.error("No document found for the specified domain.")
-
-        else:
-            scanid=existing_document["Scanid"]
-            collection=self.db["scans"]
-            existing_document = collection.find_one({"_id": ObjectId(scanid)})
-            existing_links = existing_document.get("ScanLinks", {}).get(self.identity, [])
-            missing_links = [link for link in links if link not in existing_links]
-            if missing_links:
-                collection.update_one({"_id": ObjectId(scanid)}, {"$push": {f"ScanLinks.{self.identity}": {"$each": missing_links}}})
+            self.log.error(f"No scan document found for the scan id {scanid}.")
+            return []
+        existing_links = existing_document.get("ScanLinks", {}).get(self.identity, [])
+        missing_links = [link for link in links if link not in existing_links]
+        if missing_links:
+            collection.update_one({"_id": ObjectId(scanid)}, {"$push": {f"ScanLinks.{self.identity}": {"$each": missing_links}}})
         return missing_links
     def encode_filename(self, url_or_path):
         """

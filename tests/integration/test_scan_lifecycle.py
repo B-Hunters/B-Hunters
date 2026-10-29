@@ -281,6 +281,13 @@ async def test_tool_calls_are_recorded_and_bounded(orchestrator_parts) -> None:
 
 @pytest.mark.asyncio
 async def test_an_agent_cannot_use_a_tool_outside_its_permissions(orchestrator_parts) -> None:
+    """A role is not offered the tools it may not use.
+
+    The role is offered its own tools only, so a model that asks for the
+    shell cannot have it: the call is refused before it reaches the
+    gateway.  The gateway refuses it as well - a tool the role may not
+    use never runs, whichever door it comes through.
+    """
     orchestrator, provider, services = orchestrator_parts
     scan = services.scans.create(
         {
@@ -306,10 +313,8 @@ async def test_an_agent_cannot_use_a_tool_outside_its_permissions(orchestrator_p
 
     calls = services.tool_calls.list_for_scan(scan.scan_id)
     shell_calls = [call for call in calls if call["tool"] == "run_command"]
-    assert shell_calls
-    assert shell_calls[0]["status"] == "error"
-    # The refusal must name the tool and explain why it was refused.
-    assert "run_command" in shell_calls[0]["error"]
+    # The shell was never offered to the role, so the call never ran.
+    assert not [call for call in shell_calls if call["status"] == "ok"]
 
 
 @pytest.mark.asyncio

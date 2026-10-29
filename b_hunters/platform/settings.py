@@ -116,17 +116,32 @@ class Settings:
     llm_default_model: str = ""
     llm_default_api_key: str = ""
     llm_timeout_seconds: float = 120.0
-    llm_max_retries: int = 2
+    llm_max_retries: int = 4
     llm_max_output_tokens: int = 4096
     llm_max_context_tokens: int = 128000
     llm_concurrency: int = 4
 
     # --- agents -----------------------------------------------------------
-    agent_max_rounds: int = 8
+    #: The round budget of a single agent task.  Zero means the budget
+    #: the role declares.
+    agent_max_rounds: int = 0
     agent_max_tokens_per_scan: int = 400000
     agent_max_task_budget: int = 60
     agent_wall_clock_seconds: int = 1800
+    #: The token budget of a single agent task.  Zero means the budget the
+    #: role declares.  A reasoning model needs more than a plain one: it
+    #: spends a large part of every turn on reasoning and the prompt grows
+    #: with every tool result, so a round costs far more.
+    agent_max_tokens_per_task: int = 0
+    #: The tool call budget of a single agent task.  Zero means the budget
+    #: the role declares.
+    agent_max_tool_calls_per_task: int = 0
     agent_workspace_root: str = "/var/lib/b-hunters/workspaces"
+    #: Whether a scan runs the independent verifier by default.  The
+    #: verifier re-checks every candidate finding, which costs a request
+    #: each, and the adjudicator judges the findings anyway, so it is off
+    #: unless it is asked for.  A scan that names the role still gets it.
+    agent_verification_enabled: bool = False
 
     # --- scope enforcement defaults ----------------------------------------
     scope_allow_private_network: bool = False
@@ -235,6 +250,7 @@ def load_settings(
                 "scope_allow_state_changing",
                 "enable_agents",
                 "log_json",
+                "agent_verification_enabled",
             }:
                 values[f.name] = _as_bool(raw, getattr(Settings, f.name, False))
             elif f.name in {
@@ -251,6 +267,8 @@ def load_settings(
                 "agent_max_tokens_per_scan",
                 "agent_max_task_budget",
                 "agent_wall_clock_seconds",
+                "agent_max_tokens_per_task",
+                "agent_max_tool_calls_per_task",
                 "scope_max_concurrency",
                 "scope_max_response_bytes",
                 "scope_max_duration_seconds",

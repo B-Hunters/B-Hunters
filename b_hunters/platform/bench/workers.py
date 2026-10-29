@@ -25,6 +25,7 @@ class, so that it can be matched against the benchmark's test cases.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -70,6 +71,147 @@ def _class_for_nuclei(line: str) -> str:
     return "active_vulnerability"
 
 
+def _class_for_plugin(plugin: str) -> str:
+    """Infer the class from the identifier of a plugin.
+
+    Xray names the plugin that found the issue - ``dirscan/sourcemap/
+    default``, ``baseline/sensitive/server-error`` - and the name says
+    what kind of issue it is.
+    """
+    lowered = plugin.lower()
+    for hint, vuln_class in TEMPLATE_CLASS_HINTS:
+        if hint in lowered:
+            return vuln_class
+    if "sensitive" in lowered or "disclosure" in lowered or "exposed" in lowered:
+        return "information_disclosure"
+    if "traversal" in lowered or "lfi" in lowered:
+        return "path_traversal"
+    if "csrf" in lowered:
+        return "security_misconfiguration"
+    return "active_vulnerability"
+
+
+def _issue_of(entry: dict[str, Any]) -> str:
+    """What kind of issue a structured finding is.
+
+    Two findings of the same kind are the same issue, however many URLs
+    they were found on: a server that leaks a stack trace on 117 URLs is
+    one finding, not 117.
+    """
+    return str(
+        entry.get("plugin") or entry.get("module") or entry.get("type") or entry.get("name") or ""
+    ).strip()
+
+
+def _address_of(entry: dict[str, Any]) -> str:
+    """The URL a structured finding was found on."""
+    detail = entry.get("detail") if isinstance(entry.get("detail"), dict) else {}
+    target = entry.get("target") if isinstance(entry.get("target"), dict) else {}
+    return str(
+        detail.get("addr")
+        or detail.get("url")
+        or target.get("url")
+        or entry.get("addr")
+        or entry.get("url")
+        or entry.get("data")
+        or entry.get("path")
+        or ""
+    ).strip()
+
+
+def _merged_finding(group: list[dict[str, Any]], field: str) -> dict[str, Any]:
+    """One finding for the instances of the same issue.
+
+    The URLs it was found on are kept together, so the reader sees one
+    issue and where it appears - not a hundred copies of the same line.
+    """
+    issue = _issue_of(group[0])
+    addresses: list[str] = []
+    payloads: list[str] = []
+    for entry in group:
+        address = _address_of(entry)
+        if address and address not in addresses:
+            addresses.append(address)
+        detail = entry.get("detail") if isinstance(entry.get("detail"), dict) else {}
+        payload = str(detail.get("payload") or entry.get("payload") or "").strip()
+        if payload and payload not in payloads:
+            payloads.append(payload)
+
+    count = len(group)
+    if count == 1:
+        title = f"{issue} at {addresses[0]}" if issue and addresses else (issue or field)
+    else:
+        title = f"{issue} on {count} URL(s)" if issue else f"{field} on {count} URL(s)"
+    parts = [f"issue: {issue}" if issue else f"issue: {field}", f"instances: {count}"]
+    if payloads:
+        parts.append("payload: " + "; ".join(payloads[:3]))
+    if count == 1 and addresses:
+        parts.append("address: " + addresses[0])
+    summary = "\n".join(parts)[:500]
+
+    excerpt = "\n".join(addresses[:50])
+    if len(addresses) > 50:
+        excerpt += f"\n... and {len(addresses) - 50} more"
+
+    return {
+        "title": title[:200],
+        "vuln_class": _class_for_plugin(issue) if issue else FIELD_CLASSES.get(field, "active_vulnerability"),
+        "summary": summary,
+        "evidence": [{"kind": "worker_output", "excerpt": excerpt[:4000]}],
+        "location": addresses[0] if addresses else "",
+        "detector": field,
+    }
+
+
+def _finding_from_dict(entry: dict[str, Any], field: str) -> dict[str, Any]:
+    """One structured finding a worker wrote.
+
+    A worker that finds something structured writes an object: xray
+    writes the plugin that found it, the target and the detail.  Read
+    as a string, that object says nothing - the finding needs its title,
+    its location and its evidence.
+    """
+    detail = entry.get("detail") if isinstance(entry.get("detail"), dict) else {}
+
+    plugin = _issue_of(entry)
+    address = _address_of(entry)
+    payload = str(detail.get("payload") or entry.get("payload") or "").strip()
+
+    title = str(
+        entry.get("title") or entry.get("message_str") or entry.get("message") or entry.get("name") or ""
+    ).strip()
+    if not title:
+        title = f"{plugin} at {address}" if plugin and address else (plugin or address or field)
+    title = title[:200]
+
+    # The location keeps its scheme: the platform reads the host and the
+    # path out of it, and a bare path would lose the host.
+    location = address
+
+    parts: list[str] = []
+    if plugin:
+        parts.append(f"plugin: {plugin}")
+    if address:
+        parts.append(f"address: {address}")
+    if payload:
+        parts.append(f"payload: {payload}")
+    extra = detail.get("extra")
+    if isinstance(extra, dict) and extra:
+        parts.append("extra: " + json.dumps(extra, default=str)[:300])
+    summary = "\n".join(parts)[:500]
+
+    vuln_class = _class_for_plugin(plugin) if plugin else FIELD_CLASSES.get(field, "active_vulnerability")
+
+    return {
+        "title": title,
+        "vuln_class": vuln_class,
+        "summary": summary or title,
+        "evidence": [{"kind": "worker_output", "excerpt": (summary or title)[:600]}],
+        "location": location,
+        "detector": field,
+    }
+
+
 def findings_from_report(report: dict[str, Any]) -> list[dict[str, Any]]:
     """Turn a report document into findings."""
     findings: list[dict[str, Any]] = []
@@ -81,18 +223,17 @@ def findings_from_report(report: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(entries, list):
             continue
         base_class = FIELD_CLASSES.get(field, "active_vulnerability")
+        structured: dict[str, list[dict[str, Any]]] = {}
         for entry in entries:
             if isinstance(entry, dict):
-                title = str(entry.get("title") or entry.get("message_str") or entry.get("type") or field)
-                location = str(entry.get("data") or entry.get("url") or entry.get("path") or "")
-                vuln_class = base_class
-                extra = ""
-            else:
-                text = str(entry)
-                title = text.split("\n", 1)[0][:200]
-                location = ""
-                extra = text
-                vuln_class = _class_for_nuclei(text) if field == "Nuclei" else base_class
+                # The instances of one issue are one finding.
+                structured.setdefault(_issue_of(entry), []).append(entry)
+                continue
+            text = str(entry)
+            title = text.split("\n", 1)[0][:200]
+            location = ""
+            extra = text
+            vuln_class = _class_for_nuclei(text) if field == "Nuclei" else base_class
             findings.append(
                 {
                     "title": title,
@@ -103,6 +244,8 @@ def findings_from_report(report: dict[str, Any]) -> list[dict[str, Any]]:
                     "detector": field,
                 }
             )
+        for group in structured.values():
+            findings.append(_merged_finding(group, field))
     return findings
 
 

@@ -6,8 +6,8 @@ The orchestrator owns the scan lifecycle:
 2. Dispatch the deterministic scanner work (the existing B-Hunters Karton
    workers) and the agent work.
 3. Run agent tasks respecting their dependencies, with bounded concurrency.
-4. Feed candidate findings to the independent verifier, then to the
-   adjudicator.
+4. Feed candidate findings to the adjudicator, which reconciles them and
+   records a verdict for each.
 5. Watch for stalls, budget exhaustion and cancellation, and stop cleanly.
 
 The orchestrator never contacts a target itself - it only dispatches work
@@ -20,6 +20,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -34,8 +35,15 @@ from ..db.repositories import (
     ServiceRepository,
     TaskRepository,
     ToolCallRepository,
+    compute_fingerprint,
 )
+from ..db.worker_output_repository import WorkerOutputRepository
 from ..scanners.base import ScanRequest, ScanResult
+from ..scanners.karton_bridge import (
+    KartonWorkerBridge,
+    WorkerResults,
+    finding_for_platform,
+)
 from ..scanners.registry import AdapterRegistry
 from ..security.scope import ScopeEnforcer, ScopePolicy, build_policy_from_scan
 from ..settings import Settings, get_settings
@@ -67,11 +75,111 @@ HYPOTHESIS_ROLES = (
     "source_analysis",
 )
 
-#: Roles that verify findings.
+#: Roles that verify findings.  The independent verifier is **not** part
+#: of the default plan: it re-checks every candidate finding, which costs
+#: a request each, and the adjudicator judges the findings anyway.  A
+#: scan that asks for the role by name still gets it - the roles of a
+#: scan are overridable - so nothing is lost by leaving it out.
 VERIFICATION_ROLES = ("verifier",)
 
 #: Roles that report.
 REPORTING_ROLES = ("adjudicator",)
+
+#: The share of the scan's duration the worker phase may use.  The agent
+#: roles run after it and need the rest: the workers are the slow part of
+#: a scan, and a request budget they have spent leaves the agents unable
+#: to reach the target they are supposed to reason about.
+WORKER_PHASE_SHARE = 0.5
+
+#: The share the agent phase gets.
+AGENT_PHASE_SHARE = 0.5
+
+
+#: How many candidate findings the verification role judges.  It re-checks
+#: each one it is given, and re-checking costs a request per candidate:
+#: judging all of them leaves it no budget to record the verdicts.
+VERIFIER_CANDIDATE_LIMIT = 12
+
+
+#: The rounds a judging role needs per finding it must judge.  A judge
+#: spends roughly one round reading a finding and one recording the
+#: verdict.  The number of findings is only known once the workers and
+#: the hypothesis roles have run - which is before the judge runs - so
+#: the judge's budget is scaled with it.  With a fixed budget the
+#: adjudicator ran out of rounds after half of the findings and left
+#: the rest unverified.
+JUDGING_ROUNDS_PER_FINDING = 2
+
+#: The extra rounds a judging role gets on top of the ones it needs.
+JUDGING_ROUND_MARGIN = 4
+
+#: The most rounds a judging role may take.  At roughly twenty thousand
+#: tokens a round this keeps the run inside the per-task token budget.
+MAX_JUDGING_ROUNDS = 60
+
+#: The tokens a judging round is assumed to cost, used to size the
+#: token budget of a judging role against its rounds.
+TOKENS_PER_JUDGING_ROUND = 25000
+
+
+def _kind_of(field: str) -> str:
+    """The kind of item a worker wrote."""
+    lowered = field.lower()
+    if lowered.startswith("secrets in"):
+        return "secret"
+    if lowered == "links":
+        return "url"
+    if lowered.startswith("paths"):
+        return "path"
+    if lowered.startswith("ports"):
+        return "port"
+    if lowered.startswith("technology"):
+        return "technology"
+    if lowered.startswith("screenshot") or lowered.startswith("data."):
+        return "screenshot"
+    if lowered.startswith("vulns"):
+        return "finding"
+    return "item"
+
+
+def _values_of(item: dict[str, Any]) -> list[str]:
+    """The individual values of one written item.
+
+    A worker writes a list of URLs or a list of paths as one entry; the
+    platform keeps the items apart, so that a scan of them can be made.
+    """
+    preview = str(item.get("preview", ""))
+    values = [
+        line.strip()
+        for line in preview.splitlines()
+        if line.strip() and not line.strip().startswith(("key:", "value:", "- "))
+    ]
+    return values or ([preview.strip()] if preview.strip() else [])
+
+
+def agent_roles_for(profile: ScanProfile, *, verification_enabled: bool) -> list[str]:
+    """The agent roles a scan runs.
+
+    The independent verifier is opt-in.  It re-checks every candidate
+    finding, which costs a request each, and the adjudicator judges the
+    findings anyway - so the verifier is left out unless it is asked for.
+    A scan that names the role in its own role list still gets it.
+    """
+    roles = list(profile.agent_roles)
+    if verification_enabled:
+        for role in VERIFICATION_ROLES:
+            if role not in roles:
+                roles.append(role)
+    return roles
+
+
+def _by_severity(candidates: Sequence[CandidateFinding]) -> list[CandidateFinding]:
+    """The candidates, the most severe first."""
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    return sorted(
+        candidates,
+        key=lambda c: (order.get(str(c.severity).lower(), 5), -float(c.confidence or 0)),
+    )
 
 
 @dataclass
@@ -94,7 +202,7 @@ class ScanProfile:
         return cls(
             name="standard",
             description="Discovery, analysis, verification and reporting across all agent roles.",
-            agent_roles=list(HYPOTHESIS_ROLES) + list(VERIFICATION_ROLES) + list(REPORTING_ROLES),
+            agent_roles=list(HYPOTHESIS_ROLES) + list(REPORTING_ROLES),
             scanners=[
                 "subrecon",
                 "nmap",
@@ -207,6 +315,7 @@ class ScanOrchestrator:
         provider_factory: Optional[Callable[[str], Provider]] = None,
         tool_registry: Optional[ToolRegistry] = None,
         scanner_registry: Optional[AdapterRegistry] = None,
+        worker_bridge: Optional[KartonWorkerBridge] = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.db = database
@@ -218,9 +327,14 @@ class ScanOrchestrator:
         self.findings = FindingRepository(database)
         self.tool_calls = ToolCallRepository(database)
         self.services = ServiceRepository(database)
+        self.worker_output = WorkerOutputRepository(database)
         self.provider_factory = provider_factory
         self.tool_registry = tool_registry or ToolRegistry()
         self.scanner_registry = scanner_registry or AdapterRegistry()
+        #: The bridge to the real Karton scanner workers.  ``None`` when the
+        #: worker stack is not reachable; the scan then runs the native
+        #: adapters and the agents only.
+        self.worker_bridge = worker_bridge
         self.gateway = ToolGateway(
             self.tool_registry,
             audit=self._audit_tool_call,
@@ -300,10 +414,28 @@ class ScanOrchestrator:
                 target=target,
                 depends_on=list(depends_on),
                 budget=Budget(
-                    max_tokens=int((role.budget or {}).get("max_tokens", 120000)),
-                    max_tool_calls=int((role.budget or {}).get("max_tool_calls", 40)),
-                    max_rounds=int((role.budget or {}).get("max_rounds", 6)),
-                    max_wall_clock_seconds=int((role.budget or {}).get("max_wall_clock_seconds", 900)),
+                    max_tokens=self._agent_budget(
+                        role,
+                        "max_tokens",
+                        120000,
+                        self.settings.agent_max_tokens_per_task,
+                    ),
+                    max_tool_calls=self._agent_budget(
+                        role,
+                        "max_tool_calls",
+                        40,
+                        self.settings.agent_max_tool_calls_per_task,
+                    ),
+                    max_rounds=self._agent_budget(
+                        role,
+                        "max_rounds",
+                        6,
+                        self.settings.agent_max_rounds,
+                    ),
+                    max_wall_clock_seconds=min(
+                        int((role.budget or {}).get("max_wall_clock_seconds", 900)),
+                        int(self.settings.agent_wall_clock_seconds),
+                    ),
                 ),
             )
             tasks.append(task)
@@ -376,6 +508,13 @@ class ScanOrchestrator:
         try:
             await self._wait_while_paused(context.scan_id)
             await self._dispatch_scanners(context, scope)
+            await self._dispatch_workers(context, scope)
+            # The agents get their own request budget.  The worker phase
+            # runs first and the scope enforcer's duration budget covers
+            # the whole scan, so a budget the workers have spent leaves the
+            # agents unable to make a single request - they would reason
+            # about a target they cannot reach.
+            scope = ScopeEnforcer(self._phase_policy(context, AGENT_PHASE_SHARE))
             await self._run_agent_tasks(context, plan, scope)
         except asyncio.CancelledError:
             self.scans.set_status(context.scan_id, "cancelled")
@@ -459,6 +598,303 @@ class ScanOrchestrator:
                 )
 
         await asyncio.gather(*(run_one(name) for name in sorted(native_names)))
+
+    @staticmethod
+    def _phase_policy(context: ScanContext, share: float) -> ScopePolicy:
+        """A scope policy with the duration budget of one phase."""
+        policy = context.scope_policy()
+        return ScopePolicy(
+            authorized_hosts=policy.authorized_hosts,
+            excluded_paths=policy.excluded_paths,
+            authorized_ports=policy.authorized_ports,
+            denied_hosts=policy.denied_hosts,
+            allow_private_network=policy.allow_private_network,
+            allow_http=policy.allow_http,
+            allow_state_changing=policy.allow_state_changing,
+            safe_methods=policy.safe_methods,
+            max_requests_per_second=policy.max_requests_per_second,
+            max_concurrency=policy.max_concurrency,
+            max_response_bytes=policy.max_response_bytes,
+            max_redirects=policy.max_redirects,
+            timeout=policy.timeout,
+            max_duration_seconds=max(30, int(policy.max_duration_seconds * share)),
+        )
+
+    @staticmethod
+    def _agent_budget(role: Any, key: str, default: int, override: int) -> int:
+        """The budget of one agent task.
+
+        The role carries a default, and the deployment can raise it.  The
+        override is a floor and not a replacement: a reasoning model needs
+        more of the token budget than a plain one - it spends a large part
+        of every turn on reasoning, and the prompt grows with every tool
+        result - so the deployment's value wins where the role asks for
+        less.  A role that asks for *more* keeps it: the role knows the
+        work better than the deployment does.
+        """
+        role_value = int((role.budget or {}).get(key, default))
+        if override:
+            return max(role_value, int(override))
+        return role_value
+
+    def _budget_for_task(self, context: ScanContext, role: Any, task: AgentTask) -> Budget:
+        """The budget of one agent task, scaled for a role that judges findings.
+
+        A judge needs about two rounds per finding - one to read it, one
+        to record the verdict - and it only knows how many findings there
+        are once the workers and the hypothesis roles have run, which is
+        before the judge runs.  With a fixed budget the adjudicator ran
+        out of rounds after it had judged half of the findings and left
+        the rest unverified, so the budget of a judging role is sized
+        against the findings that are still waiting for a verdict.
+        """
+        budget = task.budget
+        if role.stage not in {"verification", "reporting"}:
+            return budget
+        try:
+            pending = len(
+                self.findings.list(
+                    context.scan_id,
+                    verification_status=("unverified",),
+                    limit=2000,
+                )
+            )
+        except Exception:  # pragma: no cover - the budget must never break a scan
+            log.exception("failed to count the findings waiting for a verdict")
+            return budget
+        if pending <= 0:
+            return budget
+        rounds = min(
+            MAX_JUDGING_ROUNDS,
+            max(budget.max_rounds, pending * JUDGING_ROUNDS_PER_FINDING + JUDGING_ROUND_MARGIN),
+        )
+        calls = max(budget.max_tool_calls, pending * JUDGING_ROUNDS_PER_FINDING + JUDGING_ROUND_MARGIN)
+        tokens = max(budget.max_tokens, rounds * TOKENS_PER_JUDGING_ROUND)
+        return Budget(
+            max_tokens=tokens,
+            max_tool_calls=calls,
+            max_rounds=rounds,
+            max_wall_clock_seconds=budget.max_wall_clock_seconds,
+            max_tasks=budget.max_tasks,
+        )
+
+    async def _dispatch_workers(self, context: ScanContext, scope: ScopeEnforcer) -> None:
+        """Run the real Karton scanner workers for this scan.
+
+        The workers are separate containers that reach the target from
+        their own network namespace, so the platform does not make the
+        request itself: it publishes the task and reads back what the
+        workers wrote into the report document.  Only targets the scan
+        scope already covers are handed to them.
+        """
+        if self.worker_bridge is None:
+            return
+
+        targets = [url for url in context.targets if self._is_in_scope(context, scope, url)]
+        skipped = len(context.targets) - len(targets)
+        if skipped:
+            self._emit(
+                context.scan_id,
+                "worker.skipped",
+                {"count": skipped, "reason": "the target is not covered by the scan scope"},
+            )
+        if not targets:
+            return
+
+        self._emit(
+            context.scan_id,
+            "workers.dispatched",
+            {"targets": targets, "count": len(targets)},
+        )
+
+        started = time.monotonic()
+        budget = max(10.0, float(context.max_duration_seconds) * WORKER_PHASE_SHARE)
+        try:
+            results = await asyncio.to_thread(self._run_workers, context, targets, budget)
+        except Exception as exc:
+            log.exception("the scanner workers failed for scan %s", context.scan_id)
+            self._emit(context.scan_id, "worker.error", {"error": str(exc)})
+            return
+
+        for target, outcome in results:
+            if not outcome.consumed:
+                self._emit(
+                    context.scan_id,
+                    "worker.error",
+                    {
+                        "target": target.domain,
+                        "error": "no scanner worker consumed the task",
+                    },
+                )
+                continue
+            self._persist_worker_results(context, target, outcome)
+            self._emit(
+                context.scan_id,
+                "workers.completed",
+                {
+                    "target": target.domain,
+                    "report_id": outcome.report_id,
+                    "findings": len(outcome.findings),
+                    "services": len(outcome.services),
+                },
+            )
+
+        self._emit(
+            context.scan_id,
+            "workers.finished",
+            {"duration_seconds": round(time.monotonic() - started, 2)},
+        )
+
+    def _run_workers(self, context: ScanContext, targets: list[str], budget: float) -> list:
+        """Publish the targets and collect the results.  Runs in a thread.
+
+        Every target is published before the first one is collected, and
+        the results are collected concurrently.  The workers are separate
+        containers and they scan in parallel, so waiting for one target
+        before publishing the next one - or collecting the targets one
+        after the other - would spend the whole budget on the first
+        target and leave the others with nothing.
+        """
+        deadline = time.monotonic() + budget
+        before = self.worker_bridge.consumed_tasks()
+        # The counters are kept across every scan, so the ones from before
+        # this scan are what tell the console which workers took part in
+        # *this* scan while it is still running.
+        self.scans.update(context.scan_id, {"workers_before": before})
+        prepared = []
+        for url in targets:
+            if self._is_cancelled(context.scan_id):
+                break
+            target = self.worker_bridge.prepare(
+                url=url,
+                description=context.name,
+                platform_scan_id=context.scan_id,
+            )
+            try:
+                root_uid = self.worker_bridge.dispatch(target)
+            except Exception as exc:
+                log.warning("could not publish the task for %s: %s", target.domain, exc)
+                continue
+            prepared.append((target, root_uid))
+
+        if not prepared:
+            return []
+
+        def collect_one(item):
+            target, root_uid = item
+            try:
+                return target, self.worker_bridge.collect(target, root_uid=root_uid, deadline=deadline)
+            except Exception as exc:
+                log.warning("could not collect the results for %s: %s", target.domain, exc)
+                return target, WorkerResults()
+
+        with ThreadPoolExecutor(max_workers=len(prepared)) as pool:
+            futures = [pool.submit(collect_one, item) for item in prepared]
+            outcomes = []
+            for future in futures:
+                try:
+                    outcomes.append(future.result(timeout=max(1.0, deadline - time.monotonic())))
+                except Exception as exc:
+                    log.warning("the worker results could not be collected: %s", exc)
+
+        self._record_participation(context, before)
+        self._ingest_worker_output(context)
+        return outcomes
+
+    def _ingest_worker_output(self, context: ScanContext) -> None:
+        """Save what the scanner workers produced.
+
+        The workers write into the legacy documents.  The platform keeps a
+        copy of the same items, so that they can be queried through the
+        API, shown in the console and handed to an agent that wants to
+        scan further.
+        """
+        from ..scanners import worker_output
+
+        try:
+            report_id, report = worker_output.report_for_scan(self.db, context.scan_id)
+        except Exception as exc:  # pragma: no cover - the database may be down
+            log.warning("the worker output could not be read: %s", exc)
+            return
+        if not report:
+            return
+        produced = worker_output.produced(self.db, report)
+        rows: list[dict[str, Any]] = []
+        for identity, items in produced.items():
+            for item in items:
+                for value in item.get("values") or _values_of(item):
+                    rows.append(
+                        {
+                            "worker": identity,
+                            "kind": _kind_of(str(item.get("field", ""))),
+                            "value": value,
+                            "source": report_id,
+                        }
+                    )
+        saved = self.worker_output.replace_for_scan(context.scan_id, rows)
+        log.info("saved %s item(s) of worker output for %s", saved, context.scan_id)
+
+    def _record_participation(self, context: ScanContext, before: dict[str, int]) -> None:
+        """Record which workers took part in this scan.
+
+        A worker that found nothing writes nothing anywhere, so without this
+        there is no way to tell "ran and found nothing" from "never ran".
+        Karton counts the tasks every service consumed, so the difference
+        between the counters before and after the scan is who took part.
+        """
+        after = self.worker_bridge.consumed_tasks()
+        participation = {
+            identity: count - before.get(identity, 0)
+            for identity, count in after.items()
+            if count - before.get(identity, 0) > 0
+        }
+        if participation:
+            self.scans.update(context.scan_id, {"workers": participation})
+
+    def _persist_worker_results(self, context: ScanContext, target: Any, outcome: Any) -> None:
+        """Turn the worker output into platform findings and services."""
+        for finding in outcome.findings:
+            mapped = finding_for_platform(finding, target)
+            self.findings.upsert(
+                scan_id=context.scan_id,
+                title=mapped["title"],
+                summary=mapped["summary"],
+                vuln_class=mapped["vuln_class"],
+                severity=mapped["severity"],
+                host=mapped["host"],
+                path=mapped["path"],
+                parameter=mapped["parameter"],
+                cwe=mapped["cwe"],
+                confidence=mapped["confidence"],
+                detected_by=mapped["detected_by"],
+                detection_source=mapped["detection_source"],
+                affected_url=mapped["affected_url"],
+                evidence=mapped["evidence"],
+                remediation=mapped["remediation"],
+                extra_key=mapped["extra_key"],
+            )
+
+        for service in outcome.services:
+            self.services.record(
+                scan_id=context.scan_id,
+                url=target.url,
+                host=target.domain,
+                status_code=0,
+                title="",
+                server="",
+                services=[service],
+                headers={},
+                cookies=[],
+                favicon_hash=0,
+                tls={},
+                detector=str(service.get("source") or "worker"),
+            )
+
+    @staticmethod
+    def _is_in_scope(context: ScanContext, scope: ScopeEnforcer, url: str) -> bool:
+        """Return ``True`` when the scan scope covers the target."""
+        host = url.split("://", 1)[-1].split("/", 1)[0].split(":", 1)[0]
+        return scope.policy.matches_host(host)
 
     def _persist_scanner_result(self, context: ScanContext, name: str, result: ScanResult) -> None:
         """Turn adapter output into findings and assets."""
@@ -551,6 +987,8 @@ class ScanOrchestrator:
         pending = {task.task_id: task for task in plan}
         completed: set[str] = set()
         failed: set[str] = set()
+        #: The tokens the finished roles have spent.
+        tokens_spent = 0
         collaboration = CollaborationState()
         candidates: list[CandidateFinding] = []
 
@@ -580,8 +1018,28 @@ class ScanOrchestrator:
             ready.sort(key=lambda t: (-len(t.depends_on), t.role))
             batch = ready[: max(1, context.profile.max_concurrency)]
 
+            # The scan has a token budget of its own.  It was never
+            # enforced, so a scan could spend whatever the roles wanted;
+            # when it is spent, the roles that have not started are
+            # stopped rather than started and cut off.
+            if tokens_spent >= self.settings.agent_max_tokens_per_scan > 0:
+                for task in pending.values():
+                    self.tasks.set_status(
+                        task.task_id,
+                        "blocked",
+                        error=(
+                            "the scan ran out of its token budget "
+                            f"({tokens_spent} of {self.settings.agent_max_tokens_per_scan})"
+                        ),
+                    )
+                    pending.pop(task.task_id, None)
+                break
+
             results = await asyncio.gather(
-                *(self._run_agent_task(context, task, scope, roles, collaboration) for task in batch),
+                *(
+                    self._run_agent_task(context, task, scope, roles, collaboration, candidates)
+                    for task in batch
+                ),
                 return_exceptions=True,
             )
 
@@ -589,10 +1047,17 @@ class ScanOrchestrator:
                 pending.pop(task.task_id, None)
                 if isinstance(result, BaseException):
                     failed.add(task.task_id)
+                    log.error(
+                        "the agent task %s failed: %s",
+                        task.task_id,
+                        result,
+                        exc_info=(type(result), result, result.__traceback__),
+                    )
                     self.tasks.set_status(task.task_id, "failed", error=str(result))
                     continue
 
                 run = result
+                tokens_spent += int(getattr(run, "tokens_used", 0) or 0)
                 # The task status must reflect what the agent actually
                 # achieved: a run that failed or ran out of budget is not a
                 # successful task.
@@ -627,14 +1092,49 @@ class ScanOrchestrator:
                         continue
 
         # --- verification ------------------------------------------------
-        if not self._is_cancelled(context.scan_id) and candidates:
-            await self._run_verification(context, candidates, scope, roles, collaboration)
+        # The verification role is part of the plan and runs with the
+        # candidate findings as its input, so its verdicts can be applied
+        # to them.
 
         self._emit(
             context.scan_id,
             "collaboration.summary",
             collaboration.summary(),
         )
+
+    def _pending_verdicts(self, scan_id: str) -> list[dict[str, Any]]:
+        """The findings of a scan that wait for a verdict.
+
+        Each one is given with the evidence that supports it, so that the
+        judge can reach a verdict without looking for the evidence
+        anywhere else.
+        """
+        try:
+            findings = self.findings.list(
+                scan_id,
+                verification_status=("unverified",),
+                limit=200,
+            )
+        except Exception:  # pragma: no cover - the judge must still run
+            log.exception("failed to list the findings that wait for a verdict")
+            return []
+        pending: list[dict[str, Any]] = []
+        for finding in findings:
+            excerpt = ""
+            for entry in finding.get("evidence") or []:
+                if isinstance(entry, dict) and entry.get("excerpt"):
+                    excerpt = str(entry["excerpt"])[:200]
+                    break
+            pending.append(
+                {
+                    "finding_id": finding.get("finding_id", ""),
+                    "title": finding.get("title", ""),
+                    "severity": finding.get("severity", ""),
+                    "detected_by": finding.get("detection_source", ""),
+                    "evidence": excerpt,
+                }
+            )
+        return pending
 
     async def _run_agent_task(
         self,
@@ -643,6 +1143,7 @@ class ScanOrchestrator:
         scope: ScopeEnforcer,
         roles: dict[str, AgentRole],
         collaboration: CollaborationState,
+        candidates: Sequence[CandidateFinding] = (),
     ) -> Any:
         role = roles.get(task.role)
         if role is None:
@@ -654,16 +1155,17 @@ class ScanOrchestrator:
 
         workspace = self._workspace_for(context, task.role)
         tool_context = self._make_tool_context(context, task, scope, workspace)
+        budget = self._budget_for_task(context, role, task)
 
         runtime = AgentRuntime(
             provider=provider,
             gateway=self.gateway,
             role=role,
             config=AgentRuntimeConfig(
-                max_rounds=task.budget.max_rounds,
-                max_tool_calls=task.budget.max_tool_calls,
-                max_tokens=task.budget.max_tokens,
-                max_wall_clock_seconds=task.budget.max_wall_clock_seconds,
+                max_rounds=budget.max_rounds,
+                max_tool_calls=budget.max_tool_calls,
+                max_tokens=budget.max_tokens,
+                max_wall_clock_seconds=budget.max_wall_clock_seconds,
             ),
             on_message=lambda message: self._persist_message(context, message, collaboration),
             on_tool_call=self._audit_tool_call,
@@ -692,9 +1194,28 @@ class ScanOrchestrator:
                 "targets": context.targets,
                 "safe_mode": context.safe_mode,
                 "test_accounts": [
-                    {"username": account.get("username", "")} for account in context.test_accounts
+                    {"username": (account.get("username", "") if isinstance(account, dict) else str(account))}
+                    for account in context.test_accounts
                 ],
                 "artifacts": context.artifacts[:20],
+                # The verification role judges the candidates, so it needs
+                # them.  It re-checks each one it is given and re-checking
+                # costs a request per candidate, so it is given the most
+                # severe ones: judging all of them would leave it no
+                # budget to record the verdicts.
+                "candidate_findings": (
+                    [c.to_dict() for c in _by_severity(candidates)[:VERIFIER_CANDIDATE_LIMIT]]
+                    if task.role in VERIFICATION_ROLES
+                    else []
+                ),
+                # The judge is given the findings that wait for a verdict,
+                # with their evidence.  Without the work list it goes
+                # looking for it - in the event log, one call at a time -
+                # and reads its budget away without recording a verdict
+                # at all.
+                "pending_verdicts": (
+                    self._pending_verdicts(context.scan_id) if task.role in REPORTING_ROLES else []
+                ),
             },
         )
 
@@ -703,7 +1224,10 @@ class ScanOrchestrator:
             role=task.role,
             status="idle" if run.status == "succeeded" else "error",
             task_id=task.task_id,
-            conclusion=run.conclusion[:500],
+            # The conclusion is the summary of what the role did, so it is
+            # kept whole: a truncated one says nothing.
+            conclusion=run.conclusion,
+            error=run.error,
             detail={
                 "tokens_used": run.tokens_used,
                 "tool_calls_used": run.tool_calls_used,
@@ -711,6 +1235,9 @@ class ScanOrchestrator:
                 "duration_seconds": run.duration_seconds,
             },
         )
+
+        if task.role in VERIFICATION_ROLES:
+            self._apply_verdicts(context, candidates, run.findings)
 
         # Persist any findings the agent proposed.
         for finding in parse_findings(run.findings, role=task.role, task_id=task.task_id):
@@ -734,77 +1261,59 @@ class ScanOrchestrator:
             )
         return run
 
-    async def _run_verification(
+    def _apply_verdicts(
         self,
         context: ScanContext,
         candidates: Sequence[CandidateFinding],
-        scope: ScopeEnforcer,
-        roles: dict[str, AgentRole],
-        collaboration: CollaborationState,
+        verdicts: Sequence[Any],
     ) -> None:
-        """Have the verifier re-evaluate the candidate findings."""
-        role = roles.get("verifier")
-        if role is None:
+        """Record what the verifier decided about each candidate finding.
+
+        The verifier answers with one entry per finding it looked at.  The
+        entry carries a title and a verdict, and the finding is matched on
+        the title; without a match the order is used, because the verifier
+        answers in the order it was given the candidates.
+        """
+        if not verdicts:
             return
-        provider = self._make_provider(context)
-        if provider is None:
-            return
+        by_title: dict[str, CandidateFinding] = {}
+        for candidate in candidates:
+            by_title.setdefault(candidate.title.strip().lower(), candidate)
 
-        workspace = self._workspace_for(context, "verifier")
-        task = AgentTask(
-            task_id=f"{context.scan_id}:verifier",
-            scan_id=context.scan_id,
-            role="verifier",
-            title=role.title,
-            objective=role.objective,
-        )
-        tool_context = self._make_tool_context(context, task, scope, workspace)
+        for index, verdict in enumerate(verdicts):
+            if not isinstance(verdict, dict):
+                continue
+            title = str(verdict.get("title") or "").strip().lower()
+            candidate = by_title.get(title)
+            if candidate is None and index < len(candidates):
+                candidate = candidates[index]
+            if candidate is None:
+                continue
 
-        runtime = AgentRuntime(
-            provider=provider,
-            gateway=self.gateway,
-            role=role,
-            config=AgentRuntimeConfig(
-                max_rounds=int((role.budget or {}).get("max_rounds", 8)),
-                max_tool_calls=int((role.budget or {}).get("max_tool_calls", 60)),
-                max_tokens=int((role.budget or {}).get("max_tokens", 180000)),
-                max_wall_clock_seconds=int((role.budget or {}).get("max_wall_clock_seconds", 1200)),
-            ),
-            on_message=lambda message: self._persist_message(context, message, collaboration),
-            on_tool_call=self._audit_tool_call,
-        )
+            status = str(verdict.get("verification_status") or verdict.get("verdict") or "").strip().lower()
+            if status not in {"confirmed", "likely", "rejected", "unverified", "inconclusive"}:
+                status = "confirmed" if verdict.get("confirmed") else "unverified"
 
-        self.agents.upsert(scan_id=context.scan_id, role="verifier", status="running", task_id=task.task_id)
-        run = await runtime.run(
-            scan_id=context.scan_id,
-            task_id=task.task_id,
-            objective=(
-                "Independently verify each candidate finding below. Reproduce what you can, "
-                "reject what does not hold up, and mark anything you could not confirm as "
-                "unverified or inconclusive."
-            ),
-            target=",".join(context.authorized_hosts),
-            context=tool_context,
-            input_payload={
-                "candidate_findings": [c.to_dict() for c in candidates][:50],
-            },
-        )
-        self.agents.upsert(
-            scan_id=context.scan_id,
-            role="verifier",
-            status="idle",
-            conclusion=run.conclusion[:500],
-        )
-        self._emit(
-            context.scan_id,
-            "agent.completed",
-            {
-                "task_id": task.task_id,
-                "role": "verifier",
-                "status": run.status,
-                "conclusion": run.conclusion,
-            },
-        )
+            finding = self.findings.find_by_fingerprint(
+                scan_id=context.scan_id,
+                fingerprint=compute_fingerprint(
+                    vuln_class=candidate.vuln_class,
+                    host=candidate.host,
+                    path=candidate.path,
+                    parameter=candidate.parameter,
+                    extra=candidate.extra_key,
+                ),
+            )
+            if finding is None:
+                continue
+            self.findings.set_verification(
+                finding["finding_id"],
+                status=status,
+                notes=str(verdict.get("verification_notes") or verdict.get("rationale") or ""),
+                verified_by="verifier",
+                severity=str(verdict.get("severity") or ""),
+                false_positive_reason=str(verdict.get("false_positive_reason") or ""),
+            )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -842,6 +1351,9 @@ class ScanOrchestrator:
                 "findings_repository": self.findings,
                 "events_repository": self.events,
                 "scanner_registry": self.scanner_registry,
+                # What the scanner workers produced, so that an agent can
+                # pick up what the crawlers found.
+                "worker_output_repository": self.worker_output,
                 "assets": {},
             },
         )

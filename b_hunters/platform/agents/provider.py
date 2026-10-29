@@ -27,9 +27,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Optional
 
 import httpx
@@ -40,15 +43,68 @@ log = logging.getLogger(__name__)
 
 DEFAULT_USER_AGENT = "b-hunters-platform/1.0"
 
+#: How long to wait before retrying a request the provider rate limited.
+#: The limit is counted per minute, so a short backoff is rejected again.
+RATE_LIMIT_BACKOFF_SECONDS = 15.0
+
+
+def _error_detail(response: httpx.Response) -> str:
+    """What the provider said about the failure, if it said anything.
+
+    The message is what tells a rate limit from an exhausted plan, so it
+    is worth reading: it names the limit and what to do about it.
+    """
+    try:
+        payload = response.json()
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    error = payload.get("error")
+    if isinstance(error, dict):
+        message = str(error.get("message") or "")
+        kind = str(error.get("type") or "")
+        return redact_text(f"{kind}: {message}".strip(": "))[:400]
+    if isinstance(error, str):
+        return redact_text(error)[:400]
+    return ""
+
+
+def _retry_after(response: httpx.Response) -> Optional[float]:
+    """How long the provider asked the client to wait, in seconds."""
+    header = response.headers.get("Retry-After")
+    if not header:
+        return None
+    try:
+        return max(0.0, float(header))
+    except ValueError:
+        # The header may carry a date rather than a number of seconds.
+        try:
+            when = parsedate_to_datetime(header)
+        except (TypeError, ValueError):
+            return None
+        if when is None:
+            return None
+        return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+
 
 class ProviderError(Exception):
     """Base class for provider failures."""
 
-    def __init__(self, message: str, *, status_code: int = 0, retryable: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int = 0,
+        retryable: bool = False,
+        retry_after: Optional[float] = None,
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
         self.retryable = retryable
+        #: How long the provider asked the client to wait, in seconds.
+        self.retry_after = retry_after
 
 
 class ProviderTimeout(ProviderError):
@@ -181,7 +237,7 @@ class ProviderConfig:
     max_output_tokens: int = 4096
     max_context_tokens: int = 128000
     timeout_seconds: float = 120.0
-    max_retries: int = 2
+    max_retries: int = 4
     retry_backoff_seconds: float = 1.5
     concurrency: int = 4
     extra_headers: dict[str, str] = field(default_factory=dict)
@@ -430,7 +486,7 @@ class Provider:
                 self._last_error = exc.message
                 if not exc.retryable or attempt >= attempts:
                     raise
-                delay = self.config.retry_backoff_seconds * (2 ** (attempt - 1))
+                delay = self._backoff(exc, attempt)
                 log.warning(
                     "provider request failed (attempt %s/%s): %s - retrying in %.1fs",
                     attempt,
@@ -440,6 +496,24 @@ class Provider:
                 )
                 await _sleep(delay)
         raise last_error or ProviderError("provider request failed")
+
+    def _backoff(self, error: ProviderError, attempt: int) -> float:
+        """How long to wait before the next attempt.
+
+        A rate limit is not a hiccup: the provider counts the requests
+        per minute, so a short backoff is rejected again.  The provider's
+        own instruction wins, and a rate limit waits at least
+        ``RATE_LIMIT_BACKOFF_SECONDS`` per attempt.  The wait is jittered,
+        so that the roles that were rejected together do not come back
+        together.
+        """
+        if error.retry_after is not None:
+            delay = float(error.retry_after)
+        elif error.status_code == 429:
+            delay = RATE_LIMIT_BACKOFF_SECONDS * attempt
+        else:
+            delay = self.config.retry_backoff_seconds * (2 ** (attempt - 1))
+        return delay + random.uniform(0.0, min(delay * 0.25, 2.0))
 
     async def _request(self, body: dict[str, Any], *, timeout: Optional[float]) -> Completion:
         client = self._get_client()
@@ -470,7 +544,34 @@ class Provider:
                 retryable=False,
             )
         if response.status_code == 429:
-            raise ProviderError("provider rate limit reached (HTTP 429)", status_code=429, retryable=True)
+            detail = _error_detail(response)
+            # A provider that counts its requests per minute answers a
+            # rate limit.  A provider whose plan is exhausted answers the
+            # same status code, and waiting does not help: the account
+            # has to be topped up.  The two are told apart by the
+            # message, and only the first one is worth retrying.
+            exhausted = any(
+                marker in detail.lower()
+                for marker in (
+                    "usage limit reached",
+                    "upgrade your token plan",
+                    "insufficient balance",
+                    "insufficient credit",
+                    "purchase credit",
+                    "quota exhausted",
+                )
+            )
+            message = "provider rate limit reached (HTTP 429)"
+            if detail:
+                message = f"{message}: {detail}"
+            if exhausted:
+                message = f"{message} - the provider's plan is exhausted, retrying will not help"
+            raise ProviderError(
+                message,
+                status_code=429,
+                retryable=not exhausted,
+                retry_after=_retry_after(response),
+            )
         if response.status_code >= 500:
             raise ProviderError(
                 f"provider error HTTP {response.status_code}: {redact_text(response.text[:400])}",
@@ -493,6 +594,19 @@ class Provider:
         return self._parse(payload, latency_ms=latency_ms, raw_body=body)
 
     def _parse(self, payload: dict[str, Any], *, latency_ms: int, raw_body: dict[str, Any]) -> Completion:
+        try:
+            return self._parse_completion(payload, latency_ms=latency_ms, raw_body=raw_body)
+        except ProviderError:
+            raise
+        except AttributeError as exc:
+            # A field the endpoint returns in a shape the parser does not
+            # know.  Say so, instead of failing with "str object has no
+            # attribute get" and leaving no clue what went wrong.
+            raise ProviderInvalidResponse(f"the provider response had an unexpected shape: {exc}") from exc
+
+    def _parse_completion(
+        self, payload: dict[str, Any], *, latency_ms: int, raw_body: dict[str, Any]
+    ) -> Completion:
         if not isinstance(payload, dict):
             raise ProviderInvalidResponse("provider response was not a JSON object")
         choices = payload.get("choices")
@@ -518,7 +632,11 @@ class Provider:
             for index, raw in enumerate(raw_calls):
                 if not isinstance(raw, dict):
                     continue
-                function = raw.get("function") or {}
+                function = raw.get("function")
+                if not isinstance(function, dict):
+                    # A malformed call is skipped, not fatal: one odd entry
+                    # must not take the whole agent run down with it.
+                    continue
                 name = function.get("name") or ""
                 arguments = function.get("arguments")
                 if isinstance(arguments, str):
@@ -629,6 +747,6 @@ def provider_config_from_env(prefix: str = "BHUNTERS_LLM_") -> ProviderConfig:
         max_output_tokens=int(_get("MAX_OUTPUT_TOKENS", "4096") or 4096),
         max_context_tokens=int(_get("MAX_CONTEXT_TOKENS", "128000") or 128000),
         timeout_seconds=float(_get("TIMEOUT", "120") or 120),
-        max_retries=int(_get("MAX_RETRIES", "2") or 2),
+        max_retries=int(_get("MAX_RETRIES", "4") or 4),
         concurrency=int(_get("CONCURRENCY", "4") or 4),
     )

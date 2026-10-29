@@ -341,15 +341,56 @@ function renderRecentScans(scans) {
   </tbody></table>`;
 }
 
-function renderAgents(agents) {
+async function scanTheseUrls(output) {
+  const items = (output && output.items) || [];
+  const urls = items.filter((item) => item.kind === 'url').map((item) => item.value);
+  if (!urls.length) return;
+  let host = '';
+  try {
+    host = new URL(urls[0]).hostname;
+  } catch (err) {
+    host = '';
+  }
+  const created = await api('/scans', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: `follow-up scan of ${host || 'the crawled URLs'}`,
+      targets: { urls, authorized_hosts: host ? [host] : [] },
+      test_environment: true,
+    }),
+  });
+  location.hash = `#/scans/${created.scan_id}`;
+}
+
+function renderAgents(agents, toolCalls) {
   if (!agents.length) return '<div class="empty">No agents are active.</div>';
-  return `<table><thead><tr><th>Role</th><th>Status</th><th>Conclusion</th><th>Last seen</th></tr></thead><tbody>
-    ${agents.map((agent) => `<tr>
+  // What each role actually did, from the tool calls it recorded.
+  const byRole = {};
+  (toolCalls || []).forEach((call) => {
+    const role = call.agent_role || call.role || 'unknown';
+    byRole[role] = byRole[role] || {};
+    const tool = call.tool || call.name || 'tool';
+    byRole[role][tool] = (byRole[role][tool] || 0) + 1;
+  });
+  return `<table><thead><tr><th>Role</th><th>Status</th><th>What it did</th><th>Conclusion</th><th>Last seen</th></tr></thead><tbody>
+    ${agents.map((agent) => {
+      const tools = byRole[agent.role] || {};
+      const used = Object.keys(tools).sort().map((tool) => `${tool} ×${tools[tool]}`).join(', ');
+      const detail = agent.detail || {};
+      const counts = [
+        detail.rounds ? `${detail.rounds} rounds` : '',
+        detail.tool_calls_used ? `${detail.tool_calls_used} tool calls` : '',
+        detail.tokens_used ? `${detail.tokens_used} tokens` : '',
+        detail.duration_seconds ? `${detail.duration_seconds}s` : '',
+      ].filter(Boolean).join(' · ');
+      return `<tr>
       <td class="mono">${escape(agent.role)}</td>
       <td>${badge(agent.status)}</td>
-      <td class="small">${escape((agent.conclusion || '').slice(0, 120))}</td>
+      <td class="small">${escape(used || '-')}${counts ? `<div class="faint">${escape(counts)}</div>` : ''}</td>
+      <td class="small">${escape(agent.conclusion || (agent.error ? agent.error : '-'))}</td>
       <td class="small faint">${fmtTime(agent.last_seen_at)}</td>
-    </tr>`).join('')}
+    </tr>`;
+    }).join('')}
   </tbody></table>`;
 }
 
@@ -533,9 +574,13 @@ registerRoute('new-scan', async () => {
             <div class="field">
               <label for="scan-profile">Scan profile</label>
               <select id="scan-profile">
-                <option value="standard">standard - discovery, analysis, verification, reporting</option>
+                <option value="standard">standard - discovery, analysis, reporting</option>
                 <option value="recon">recon - discovery only</option>
               </select>
+            </div>
+            <div class="field">
+              <label style="display:flex;align-items:center;gap:7px;margin:0"><input type="checkbox" id="scan-verifier" style="width:auto"> Independent verifier</label>
+              <div class="hint">The verifier re-checks every candidate finding, which costs one request each. The reporting role reconciles the findings either way. Leave it off unless you want the second opinion.</div>
             </div>
           </div>
         </div>
@@ -546,7 +591,7 @@ registerRoute('new-scan', async () => {
             <div class="chips" id="role-chips">
               ${roleList.map((role) => `<span class="chip" data-role="${escape(role.role)}" title="${escape(role.objective)}">${escape(role.title)}</span>`).join('')}
             </div>
-            <div class="hint" style="margin-top:10px">Click a role to include it. The orchestrator adds verification and reporting automatically.</div>
+            <div class="hint" style="margin-top:10px">Click the roles this scan should run. The reporting role is always added. Leave every chip off to run the whole set.</div>
           </div>
         </div>
 
@@ -602,6 +647,7 @@ registerRoute('new-scan', async () => {
     max_requests_per_second: Number(el('scan-rps').value),
     request_timeout: Number(el('scan-timeout').value),
     max_duration_seconds: Number(el('scan-duration').value),
+    independent_verifier: el('scan-verifier').checked,
     safe_mode: el('scan-safe').checked,
     allow_state_changing: el('scan-state').checked,
     test_environment: el('scan-lab').checked,
@@ -697,6 +743,7 @@ registerRoute('scans/:id', async (params) => {
       <div class="tab" data-tab="agents">Agents</div>
       <div class="tab" data-tab="messages">Collaboration</div>
       <div class="tab" data-tab="tools">Tool calls</div>
+      <div class="tab" data-tab="scanners">Scanners</div>
       <div class="tab" data-tab="services">Services</div>
       <div class="tab" data-tab="findings">Findings</div>
     </div>
@@ -744,7 +791,8 @@ async function renderScanTab(tab, scanId) {
   }
   if (tab === 'agents') {
     const data = await api(`/scans/${scanId}/agents`);
-    body.innerHTML = `<div class="card"><div class="card-body tight"><div class="table-scroll">${renderAgents(data.agents || [])}</div></div></div>`;
+    const calls = await api(`/scans/${scanId}/tool-calls?limit=2000`);
+    body.innerHTML = `<div class="card"><div class="card-body tight"><div class="table-scroll">${renderAgents(data.agents || [], calls.tool_calls || [])}</div></div></div>`;
     return;
   }
   if (tab === 'messages') {
@@ -757,6 +805,14 @@ async function renderScanTab(tab, scanId) {
     body.innerHTML = `<div class="card"><div class="card-head"><h2>Tool invocations</h2><span class="desc">${data.total} calls, ${data.failed} failed</span></div><div class="card-body tight"><div class="table-scroll">${renderToolCalls(data.tool_calls || [])}</div></div></div>`;
     return;
   }
+  if (tab === 'scanners') {
+    const data = await api(`/scans/${scanId}/scanners`);
+    const output = await api(`/scans/${scanId}/worker-output?limit=300`);
+    body.innerHTML = renderScanners(data, output);
+    const action = el('scan-these');
+    if (action) action.addEventListener('click', () => scanTheseUrls(output));
+    return;
+  }
   if (tab === 'services') {
     const data = await api(`/scans/${scanId}/services`);
     body.innerHTML = renderServices(data);
@@ -766,6 +822,59 @@ async function renderScanTab(tab, scanId) {
     const data = await api(`/findings?scan_id=${encodeURIComponent(scanId)}&limit=500`);
     body.innerHTML = `<div class="card"><div class="card-body tight"><div class="table-scroll">${renderFindings(data.items || [])}</div></div></div>`;
   }
+}
+
+function renderScanners(data, output) {
+  const workers = data.workers || [];
+  if (!workers.length) return '<div class="empty">No scanner workers are connected.</div>';
+  const summary = data.summary || {};
+  const ran = workers.filter((w) => w.tasks || w.output.length).length;
+  const found = workers.filter((w) => w.status === 'found').length;
+  const crawled = summary.crawled_urls ?? 0;
+  const parameterised = summary.urls_with_parameters ?? 0;
+  const states = {
+    found: 'bg-success',
+    'ran, found nothing': 'bg-secondary',
+    running: 'bg-info',
+    'did not run': 'bg-secondary',
+  };
+  const items = (output && output.items) || [];
+  const urls = items.filter((item) => item.kind === 'url').map((item) => item.value);
+  return `<div class="card-head"><h2>Scanner workers</h2><span class="desc">${ran} of ${workers.length} took part &middot; ${found} found something &middot; ${crawled} URL(s) crawled, ${parameterised} of them carry parameters</span></div>
+  <table><thead><tr><th>Scanner</th><th>Status</th><th>Tasks</th><th>Items</th><th>What it found</th></tr></thead><tbody>
+    ${workers.map((worker) => `<tr>
+      <td class="mono small">${escape(worker.worker)}</td>
+      <td><span class="badge ${states[worker.status] || 'bg-secondary'}">${escape(worker.status)}</span>${worker.candidates ? `<div class="faint small">${worker.candidates} candidate URL(s) carried parameters</div>` : ''}</td>
+      <td class="num">${worker.tasks || 0}${worker.live_tasks && !worker.tasks ? ` <span class="faint small">(${worker.live_tasks} all scans)</span>` : ''}</td>
+      <td class="num">${worker.items || '-'}</td>
+      <td class="small">${(worker.output || []).length
+        ? worker.output.map((item) => `<div><span class="mono faint">${escape(item.field)}</span> &middot; ${item.count} item(s)${item.truncated ? ' <span class="faint">(output cut at 20000 characters)</span>' : ''}</div>${renderOutput(item.preview)}</div>`).join('')
+        : '<span class="faint">-</span>'}</td>
+    </tr>`).join('')}
+  </tbody></table>
+  <div class="card-head"><h2>What the scanners found</h2><span class="desc">${items.length} item(s) saved</span></div>
+  <div class="card-body">
+    ${urls.length
+      ? `<button class="btn" id="scan-these">Scan these ${urls.length} URL(s)</button>
+         <div class="hint">A follow-up scan with these URLs as its targets: the native adapters and the agents work on the surface the crawler found, not only on the entry point.</div>`
+      : '<div class="hint">The crawlers found no URL to scan again.</div>'}
+    <div class="table-scroll"><table><thead><tr><th>Scanner</th><th>Kind</th><th>Value</th></tr></thead><tbody>
+      ${items.slice(0, 300).map((item) => `<tr>
+        <td class="mono small">${escape(item.worker)}</td>
+        <td class="small">${escape(item.kind)}</td>
+        <td class="mono small">${escape(item.value)}</td></tr>`).join('')}
+    </tbody></table></div>
+  </div>`;
+}
+
+function renderOutput(text) {
+  // A long output is collapsed, not cut: the whole of it is in the page
+  // and the reader opens it when they want it.
+  const body = escape(text || '');
+  if (body.length <= 900) {
+    return `<pre style="white-space: pre-wrap; font-size: 0.78rem; margin: 0.2rem 0 0.6rem 0;">${body}</pre>`;
+  }
+  return `<details><summary style="cursor: pointer; font-size: 0.78rem;">${body.slice(0, 900)} … (${body.length} characters, open for the rest)</summary><pre style="white-space: pre-wrap; font-size: 0.78rem; margin: 0.2rem 0 0.6rem 0;">${body}</pre></details>`;
 }
 
 function renderTasks(tasks) {
@@ -964,17 +1073,17 @@ function renderServices(data) {
 function renderFindings(items) {
   if (!items.length) return '<div class="empty"><div class="big">No findings</div>Findings appear here once a scanner or agent reports one.</div>';
   return `<table><thead><tr>
-    <th>Severity</th><th>Title</th><th>Class</th><th>Location</th><th>Confidence</th><th>Verification</th><th>Detected by</th><th>Last seen</th>
+    <th>Severity</th><th>Tool</th><th>Title</th><th>Class</th><th>Location</th><th>Confidence</th><th>Verification</th><th>Last seen</th>
   </tr></thead><tbody>
   ${items.map((finding) => `<tr>
     <td>${severityBadge(finding.severity)}</td>
+    <td class="small"><span class="badge bg-secondary">${escape((finding.detected_by || []).join(', ') || finding.detection_source || '-')}</span></td>
     <td>${escape(finding.title)}
       <div class="small faint">${escape((finding.summary || '').slice(0, 150))}</div></td>
     <td class="small">${escape(finding.vuln_class)}${finding.cwe ? `<div class="faint">${escape(finding.cwe)}</div>` : ''}</td>
     <td class="mono small">${escape(finding.host || '-')}${escape(finding.path || '')}</td>
     <td class="num">${Math.round((finding.confidence ?? 0) * 100)}%</td>
     <td>${badge(finding.verification_status)}</td>
-    <td class="small faint">${escape((finding.detected_by || []).join(', '))}</td>
     <td class="small faint nowrap">${fmtTime(finding.last_seen_at)}</td>
   </tr>`).join('')}
   </tbody></table>`;

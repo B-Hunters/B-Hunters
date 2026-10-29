@@ -25,7 +25,14 @@ x-tailscale: &tailscale
     - TS_AUTHKEY=${TS_AUTHKEY}
     - TS_STATE_DIR=/var/lib/tailscale
     - TS_USERSPACE=false
-    - TS_ACCEPT_DNS=true
+    # The platform shares this container's network namespace, so the
+    # resolver it sees is the one in /etc/resolv.conf.  With DNS accepted
+    # here, tailscaled overwrites that file with MagicDNS and the Docker
+    # embedded resolver disappears - and the container names of the
+    # database, the artefact store and the laboratory then resolve
+    # intermittently, which costs findings.  The platform resolves no
+    # tailnet name, so the embedded resolver is what it wants.
+    - TS_ACCEPT_DNS=false
   volumes:
     - /dev/net/tun:/dev/net/tun
 
@@ -59,19 +66,51 @@ services:
     restart: unless-stopped
     environment:
       - BHUNTERS_HOST=0.0.0.0
-      - BHUNTERS_PORT=8080
+      - BHUNTERS_PORT=80
+      - BHUNTERS_BASE_URL=http://${BHUNTER_TS_HOSTNAME:-bhunter}
       - BHUNTERS_MONGO_URI=mongodb://bhunter:bhunter_dev_pw@mongo:27017/?authSource=admin
       - BHUNTERS_MONGO_DB=b-hunters
       - BHUNTERS_KARTON_CONFIG_PATH=/etc/b-hunters/b-hunters.ini
       - BHUNTERS_AGENT_WORKSPACE_ROOT=/var/lib/b-hunters/workspaces
       - BHUNTERS_SESSION_COOKIE_SECURE=false
       - BHUNTERS_CORS_ORIGINS=
+      # The model provider.  The credentials come from the environment
+      # file, never from the database and never from source control.  The
+      # agent roles fall back to this configuration when no provider has
+      # been registered by name.
+      - BHUNTERS_LLM_NAME=${MINIMAX_NAME:-minimax}
+      - BHUNTERS_LLM_BASE_URL=${MINIMAX_HOST}
+      - BHUNTERS_LLM_API_KEY=${MINIMAX_KEY}
+      - BHUNTERS_LLM_MODEL=${MINIMAX_MODEL:-MINIMAX-M3.1-flash}
+      - BHUNTERS_LLM_MAX_OUTPUT_TOKENS=8192
+      - BHUNTERS_LLM_TIMEOUT=300
+      # The agent budgets.  A reasoning model needs a larger token budget
+      # than the roles declare: it spends a large part of every turn on
+      # reasoning and the prompt grows with every tool result.
+      # The independent verifier re-checks every candidate finding, which
+      # costs one request each.  It is off unless it is asked for: set
+      # this to true, or use the checkbox on the scan form.
+      - BHUNTERS_AGENT_VERIFICATION_ENABLED=${BHUNTERS_AGENT_VERIFICATION_ENABLED:-false}
+      # A reasoning model spends about 30k tokens a round, so a role that
+      # works for twenty rounds needs more than the default.
+      - BHUNTERS_AGENT_MAX_TOKENS_PER_TASK=1500000
+      # The whole scan has a budget of its own.
+      - BHUNTERS_AGENT_MAX_TOKENS_PER_SCAN=12000000
+      # The adjudicator records a verdict for every finding it judges, and
+      # it ran out of tool calls before it could conclude.  The value is a
+      # floor: a role that needs less never uses it.
+      - BHUNTERS_AGENT_MAX_TOOL_CALLS_PER_TASK=100
+      # Every role used every round it was given and three of them were
+      # cut off before they concluded.  The wall clock and the token
+      # budget are the real limits.
+      - BHUNTERS_AGENT_MAX_ROUNDS=24
+      - BHUNTERS_AGENT_WALL_CLOCK_SECONDS=1800
     volumes:
       # The platform names a Karton identity; the workers do not.
       - ./deploy/platform.ini:/etc/b-hunters/b-hunters.ini:ro
       - workspaces:/var/lib/b-hunters
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/readyz || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/readyz || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -151,6 +190,37 @@ services:
     networks:
       - bhunter
 
+  # --- the Karton dashboard, on the tailnet ------------------------------
+  # The dashboard is a second tailnet node, named "karton-dashboard".  It
+  # shares its network namespace with the dashboard application, the same
+  # way the platform shares its namespace with the "bhunter" node, so the
+  # dashboard answers on http://karton-dashboard.<tailnet>.ts.net:5000
+  # as well as on the loopback interface of the host.
+  tailscale-dashboard:
+    <<: *tailscale
+    container_name: bhunter_ts_dashboard
+    hostname: ${BHUNTER_TS_DASHBOARD_HOSTNAME:-karton-dashboard}
+    volumes:
+      - ts_dashboard_data:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      # The loopback publication belongs to the container that owns the
+      # network namespace; the dashboard application shares it.
+      - "127.0.0.1:5000:80"
+    networks:
+      - bhunter
+
+  karton-dashboard:
+    image: b-hunters-local/karton-dashboard:1.0.0
+    container_name: bhunter_karton_dashboard
+    restart: unless-stopped
+    network_mode: service:tailscale-dashboard
+    command: ["karton-dashboard", "run", "--host", "0.0.0.0", "--port", "80"]
+    volumes:
+      - ./deploy/platform.ini:/etc/karton/karton.ini:ro
+    depends_on:
+      - tailscale-dashboard
+
   # --- the scanner workers -----------------------------------------------
   # Every worker reads the same configuration and registers under its own
   # Karton identity.
@@ -165,7 +235,8 @@ services:
     depends_on:
       - karton-system
     networks:
-      - bhunter
+      bhunter:
+        ipv4_address: 172.25.0.40
 
   worker-katana:
     image: b-hunters-local/katana:1.2.0
@@ -178,7 +249,8 @@ services:
     depends_on:
       - karton-system
     networks:
-      - bhunter
+      bhunter:
+        ipv4_address: 172.25.0.41
 
   worker-nmap:
     image: b-hunters-local/nmap:1.2.0
@@ -191,7 +263,8 @@ services:
     depends_on:
       - karton-system
     networks:
-      - bhunter
+      bhunter:
+        ipv4_address: 172.25.0.42
 
   worker-sqlmap:
     image: b-hunters-local/sqlmap:1.2.0
@@ -204,7 +277,8 @@ services:
     depends_on:
       - karton-system
     networks:
-      - bhunter
+      bhunter:
+        ipv4_address: 172.25.0.43
 
   worker-dalfox:
     image: b-hunters-local/dalfox:1.2.0
@@ -217,7 +291,8 @@ services:
     depends_on:
       - karton-system
     networks:
-      - bhunter
+      bhunter:
+        ipv4_address: 172.25.0.44
 
   worker-webtechnology:
     image: b-hunters-local/webtechnology:1.2.0
@@ -230,12 +305,185 @@ services:
     depends_on:
       - karton-system
     networks:
-      - bhunter
+      bhunter:
+        ipv4_address: 172.25.0.45
+
+  # The discovery worker.  It is the head of the task chain: it creates the
+  # legacy report document and republishes the work as a "subdomain" task,
+  # which the crawler turns into the "paths" task the scanners consume.
+  # Without it the other workers never receive anything.
+  worker-subrecon:
+    image: b-hunters-local/subrecon:1.2.0
+    container_name: bhunter_worker_subrecon
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      bhunter:
+        ipv4_address: 172.25.0.46
+
+  # The remaining scanner workers.  Every one of the seventeen belongs to
+  # this stack: the development worker stack runs the same images against a
+  # second Karton backend, so a worker that is missing here is missing from
+  # the console too.
+  worker-dirsearch:
+    image: b-hunters-local/dirsearch:1.2.0
+    container_name: bhunter_worker_dirsearch
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      bhunter:
+        ipv4_address: 172.25.0.47
+
+  worker-paramspider:
+    image: b-hunters-local/paramspider:1.2.0
+    container_name: bhunter_worker_paramspider
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      bhunter:
+        ipv4_address: 172.25.0.48
+
+  worker-gospider:
+    image: b-hunters-local/gospider:1.2.0
+    container_name: bhunter_worker_gospider
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      bhunter:
+        ipv4_address: 172.25.0.49
+
+  worker-wayback:
+    image: b-hunters-local/wayback:1.2.0
+    container_name: bhunter_worker_wayback
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      bhunter:
+        ipv4_address: 172.25.0.50
+
+  worker-getjs:
+    image: b-hunters-local/getjs:1.2.0
+    container_name: bhunter_worker_getjs
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      bhunter:
+        ipv4_address: 172.25.0.51
+
+  worker-jsscanner:
+    image: b-hunters-local/jsscanner:1.2.0
+    container_name: bhunter_worker_jsscanner
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      bhunter:
+        ipv4_address: 172.25.0.52
+
+  worker-ssti:
+    image: b-hunters-local/ssti:1.2.0
+    container_name: bhunter_worker_ssti
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      bhunter:
+        ipv4_address: 172.25.0.53
+
+  # The two slowest scanners.  They are the ones that exceed a short
+  # measurement window, so a scan needs a generous duration budget.
+  worker-wapiti:
+    image: b-hunters-local/wapiti:1.2.0
+    container_name: bhunter_worker_wapiti
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      bhunter:
+        ipv4_address: 172.25.0.54
+
+  worker-xray:
+    image: b-hunters-local/xray:1.2.0
+    container_name: bhunter_worker_xray
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      bhunter:
+        ipv4_address: 172.25.0.55
+
+  # The screenshot worker.  It drives a real browser at every discovered
+  # URL, which is the heaviest of the seventeen against a laboratory
+  # application.
+  worker-gowitness:
+    image: b-hunters-local/gowitness:1.2.0
+    container_name: bhunter_worker_gowitness
+    restart: unless-stopped
+    volumes:
+      - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+    environment:
+      - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+    depends_on:
+      - karton-system
+    networks:
+      bhunter:
+        ipv4_address: 172.25.0.56
 
   # --- the vulnerable application laboratory -----------------------------
   # These are started with `--profile lab`; they are deliberately not part
   # of the default stack, and they are published on the loopback interface
   # only.
+  #
+  # Juice Shop is behind a profile of its own: it is the heaviest of the
+  # three - it builds a search index in memory and it burns a core of CPU
+  # for as long as it is up - and a scan of the other two does not need
+  # it.  Start it with `--profile lab --profile juiceshop`.
   lab-dvga:
     image: dolevf/dvga:2.2.0
     container_name: bhunter_lab_dvga
@@ -246,22 +494,28 @@ services:
     ports:
       - "127.0.0.1:5013:5013"
     networks:
-      - bhunter
+      bhunter:
+        ipv4_address: 172.25.0.15
 
   lab-juice-shop:
     image: bkimminich/juice-shop:latest
     container_name: bhunter_lab_juice_shop
-    profiles: ["lab"]
+    profiles: ["juiceshop"]
     restart: "no"
     environment:
       # The Node.js heap has to be large enough for the search index the
-      # application builds at start-up.
-      NODE_OPTIONS: "--max-old-space-size=3072"
+      # application builds.  The index grows with the data the scanners
+      # create, so a heap that is comfortable for an idle application is
+      # not comfortable for a full seventeen-worker scan: at 6 GB the
+      # process died with "Ineffective mark-compacts near heap limit"
+      # after a few hours and took the target away mid-scan.
+      NODE_OPTIONS: "--max-old-space-size=12288"
     ports:
       - "127.0.0.1:3300:3000"
-    mem_limit: 4g
+    mem_limit: 16g
     networks:
-      - bhunter
+      bhunter:
+        ipv4_address: 172.25.0.13
 
   lab-webgoat:
     image: webgoat/webgoat:latest
@@ -271,13 +525,15 @@ services:
     ports:
       - "127.0.0.1:8081:8080"
     networks:
-      - bhunter
+      bhunter:
+        ipv4_address: 172.25.0.14
 
 volumes:
   mongo_data:
   redis_data:
   s3_data:
   ts_bhunter_data:
+  ts_dashboard_data:
   workspaces:
 
 networks:

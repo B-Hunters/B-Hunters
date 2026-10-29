@@ -237,6 +237,11 @@ class ScanRecord:
     stats: dict[str, Any] = field(default_factory=dict)
     scope: dict[str, Any] = field(default_factory=dict)
     error: str = ""
+    #: How many tasks each scanner worker consumed during this scan.
+    workers: dict[str, int] = field(default_factory=dict)
+    #: The task counters from before the scan, so that the workers that
+    #: took part in it can be told apart while it is still running.
+    workers_before: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def from_document(cls, doc: dict[str, Any]) -> ScanRecord:
@@ -251,6 +256,8 @@ class ScanRecord:
             stats=doc.get("stats", {}),
             scope=doc.get("scope", {}),
             error=doc.get("error", ""),
+            workers={k: int(v) for k, v in (doc.get("workers") or {}).items()},
+            workers_before={k: int(v) for k, v in (doc.get("workers_before") or {}).items()},
         )
 
     def public(self) -> dict[str, Any]:
@@ -265,6 +272,7 @@ class ScanRecord:
             "stats": self.stats,
             "scope": self.scope,
             "error": self.error,
+            "workers": self.workers,
         }
 
 
@@ -500,6 +508,7 @@ class AgentStateRepository:
         task_id: str = "",
         conclusion: str = "",
         detail: dict[str, Any] | None = None,
+        error: str = "",
     ) -> dict[str, Any]:
         now = utcnow()
         document = {
@@ -510,6 +519,7 @@ class AgentStateRepository:
             "task_id": task_id,
             "conclusion": conclusion,
             "detail": detail or {},
+            "error": error,
             "last_seen_at": now,
         }
         self._col.update_one(
@@ -760,6 +770,24 @@ class ServiceRepository:
 # ----------------------------------------------------------------------
 # Findings and evidence
 # ----------------------------------------------------------------------
+def _as_evidence_items(evidence: Any) -> list[Any]:
+    """The evidence of a finding as a list of items.
+
+    A model writes the evidence as a list, but it also writes it as a
+    single string often enough that treating the string as a sequence
+    would store one record per character.
+    """
+    if evidence is None:
+        return []
+    if isinstance(evidence, str):
+        return [evidence]
+    if isinstance(evidence, dict):
+        return [evidence]
+    if isinstance(evidence, (list, tuple)):
+        return list(evidence)
+    return [evidence]
+
+
 def compute_fingerprint(
     *,
     vuln_class: str,
@@ -870,7 +898,7 @@ class FindingRepository:
                 created = False
             else:
                 created = True
-                for item in evidence:
+                for item in _as_evidence_items(evidence):
                     self._add_evidence(document["finding_id"], scan_id, item)
                 return document, created
 
@@ -887,25 +915,50 @@ class FindingRepository:
             updates["remediation"] = remediation
         self._col.update_one({"finding_id": existing["finding_id"]}, {"$set": updates})
         if evidence:
-            for item in evidence:
+            for item in _as_evidence_items(evidence):
                 self._add_evidence(existing["finding_id"], scan_id, item)
         existing.update(updates)
         return existing, False
 
-    def _add_evidence(self, finding_id: str, scan_id: str, item: dict[str, Any]) -> None:
-        self._evidence.insert_one(
-            {
-                "evidence_id": new_id(),
-                "finding_id": finding_id,
-                "scan_id": scan_id,
+    def _add_evidence(self, finding_id: str, scan_id: str, item: Any) -> None:
+        """Record one piece of evidence for a finding.
+
+        A model writes its evidence in whatever shape it likes: a
+        dictionary with the source and an excerpt, or a plain sentence.
+        Both are accepted, because a finding with the evidence it came
+        with is worth more than a finding that was dropped over the shape
+        of its evidence.
+        """
+        if isinstance(item, dict):
+            fields = {
                 "kind": item.get("kind", "note"),
                 "reference": item.get("reference", ""),
                 "excerpt": item.get("excerpt", ""),
                 "request": item.get("request", ""),
                 "response": item.get("response", ""),
+            }
+        else:
+            text = "" if item is None else str(item)
+            fields = {
+                "kind": "note",
+                "reference": "",
+                "excerpt": text[:2000],
+                "request": "",
+                "response": "",
+            }
+        self._evidence.insert_one(
+            {
+                "evidence_id": new_id(),
+                "finding_id": finding_id,
+                "scan_id": scan_id,
+                **fields,
                 "created_at": utcnow(),
             }
         )
+
+    def find_by_fingerprint(self, *, scan_id: str, fingerprint: str) -> Optional[dict[str, Any]]:
+        """The finding of a scan with that fingerprint, if there is one."""
+        return self._col.find_one({"scan_id": scan_id, "fingerprint": fingerprint})
 
     def get(self, finding_id: str) -> Optional[dict[str, Any]]:
         return self._col.find_one({"finding_id": finding_id})
@@ -941,13 +994,45 @@ class FindingRepository:
             query["detected_by"] = detected_by
         if confidence_min is not None:
             query["confidence"] = {"$gte": float(confidence_min)}
-        cursor = (
-            self._col.find(query)
-            .sort([("severity", 1), ("confidence", -1)])
-            .skip(max(0, offset))
-            .limit(max(1, min(limit, 2000)))
+        cursor = self._col.aggregate(
+            [
+                {"$match": query},
+                # The severity has to be ordered by how bad it is, not
+                # by its name: alphabetically "info" comes before
+                # "medium", so the judge read the least important
+                # findings first and ran out of rounds before it had
+                # seen the serious ones.
+                {
+                    "$addFields": {
+                        "_severity_rank": {
+                            "$let": {
+                                "vars": {
+                                    "rank": {
+                                        "$indexOfArray": [
+                                            {"$literal": list(SEVERITIES)},
+                                            {"$ifNull": ["$severity", "info"]},
+                                        ]
+                                    }
+                                },
+                                # A severity that is not one of the
+                                # known ones sorts last, not first.
+                                "in": {"$cond": [{"$lt": ["$$rank", 0]}, len(SEVERITIES), "$$rank"]},
+                            }
+                        }
+                    }
+                },
+                {"$sort": {"_severity_rank": 1, "confidence": -1}},
+                {"$skip": max(0, offset)},
+                {"$limit": max(1, min(limit, 2000))},
+            ]
         )
-        return list(cursor)
+        return [self._strip_rank(document) for document in cursor]
+
+    @staticmethod
+    def _strip_rank(document: dict[str, Any]) -> dict[str, Any]:
+        """Remove the sort helper from a finding document."""
+        document.pop("_severity_rank", None)
+        return document
 
     def count(self, scan_id: str = "") -> int:
         query = {"scan_id": scan_id} if scan_id else {}

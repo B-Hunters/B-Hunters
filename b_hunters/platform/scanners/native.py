@@ -178,7 +178,13 @@ async def security_headers_executor(request: ScanRequest) -> ScanResult:
 # TLS configuration
 # ----------------------------------------------------------------------
 async def tls_configuration_executor(request: ScanRequest) -> ScanResult:
-    """Inspect the TLS configuration of every in-scope HTTPS target."""
+    """Inspect the TLS configuration of every in-scope HTTPS target.
+
+    A plain HTTP target is not a failure of the target: there is no TLS
+    session to inspect.  Such a target is skipped, because a handshake
+    against an HTTP server only produces a misleading
+    ``WRONG_VERSION_NUMBER`` error.
+    """
     items: list[dict[str, Any]] = []
     errors: list[str] = []
 
@@ -189,6 +195,8 @@ async def tls_configuration_executor(request: ScanRequest) -> ScanResult:
             parts = urlsplit(target)
             host = parts.hostname or ""
             port = parts.port or 443
+            if parts.scheme.lower() != "https":
+                continue
         if not host:
             continue
 

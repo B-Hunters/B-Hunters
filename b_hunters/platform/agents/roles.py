@@ -20,6 +20,7 @@ from ..tools.gateway import (
     CAPABILITY_NETWORK,
     CAPABILITY_READ,
     CAPABILITY_SHELL,
+    CAPABILITY_VERIFY,
     ToolPermissions,
 )
 
@@ -160,6 +161,15 @@ AGENT_OUTPUT_SCHEMA: dict[str, Any] = {
                     "summary": {"type": "string"},
                     "confidence": {"type": "number"},
                     "remediation": {"type": "string"},
+                    # The verification role writes the verdict on the
+                    # finding it examined.  Without it the verdict only
+                    # exists in prose and never reaches the finding.
+                    "verification_status": {
+                        "type": "string",
+                        "enum": ["confirmed", "likely", "unverified", "inconclusive", "rejected"],
+                    },
+                    "verification_notes": {"type": "string"},
+                    "false_positive_reason": {"type": "string"},
                 },
                 "required": ["title", "vuln_class", "severity", "summary"],
                 "additionalProperties": True,
@@ -280,10 +290,12 @@ BUILTIN_ROLES: list[AgentRole] = [
             "parse_document",
             "read_file",
             "list_files",
+            "list_worker_output",
         ],
         permissions=_perms(
             [CAPABILITY_NETWORK, CAPABILITY_READ],
             [
+                "list_worker_output",
                 "http_request",
                 "list_assets",
                 "list_events",
@@ -326,10 +338,12 @@ BUILTIN_ROLES: list[AgentRole] = [
             "read_file",
             "list_files",
             "list_assets",
+            "list_worker_output",
         ],
         permissions=_perms(
             [CAPABILITY_NETWORK, CAPABILITY_READ],
             [
+                "list_worker_output",
                 "http_request",
                 "analyze_javascript",
                 "analyze_html",
@@ -370,10 +384,12 @@ BUILTIN_ROLES: list[AgentRole] = [
             "list_assets",
             "list_findings",
             "read_file",
+            "list_worker_output",
         ],
         permissions=_perms(
             [CAPABILITY_NETWORK, CAPABILITY_READ],
             [
+                "list_worker_output",
                 "http_request",
                 "compare_responses",
                 "parse_document",
@@ -417,10 +433,12 @@ BUILTIN_ROLES: list[AgentRole] = [
             "parse_document",
             "read_file",
             "list_assets",
+            "list_worker_output",
         ],
         permissions=_perms(
             [CAPABILITY_NETWORK, CAPABILITY_READ],
             [
+                "list_worker_output",
                 "http_request",
                 "compare_responses",
                 "analyze_javascript",
@@ -460,10 +478,18 @@ BUILTIN_ROLES: list[AgentRole] = [
             "list_findings",
             "list_assets",
             "read_file",
+            "list_worker_output",
         ],
         permissions=_perms(
             [CAPABILITY_NETWORK, CAPABILITY_READ],
-            ["http_request", "compare_responses", "list_findings", "list_assets", "read_file"],
+            [
+                "http_request",
+                "compare_responses",
+                "list_findings",
+                "list_assets",
+                "read_file",
+                "list_worker_output",
+            ],
         ),
         output_schema=AGENT_OUTPUT_SCHEMA,
         budget={"max_rounds": 8, "max_tool_calls": 60, "max_tokens": 180000, "max_wall_clock_seconds": 1200},
@@ -487,10 +513,24 @@ BUILTIN_ROLES: list[AgentRole] = [
             "server. If you cannot distinguish a true positive from an application error, "
             "report it as unverified with both responses attached."
         ),
-        tools=["http_request", "compare_responses", "list_findings", "list_assets", "read_file"],
+        tools=[
+            "http_request",
+            "compare_responses",
+            "list_findings",
+            "list_assets",
+            "read_file",
+            "list_worker_output",
+        ],
         permissions=_perms(
             [CAPABILITY_NETWORK, CAPABILITY_READ],
-            ["http_request", "compare_responses", "list_findings", "list_assets", "read_file"],
+            [
+                "http_request",
+                "compare_responses",
+                "list_findings",
+                "list_assets",
+                "read_file",
+                "list_worker_output",
+            ],
         ),
         output_schema=AGENT_OUTPUT_SCHEMA,
         budget={"max_rounds": 8, "max_tool_calls": 50, "max_tokens": 150000, "max_wall_clock_seconds": 900},
@@ -513,10 +553,22 @@ BUILTIN_ROLES: list[AgentRole] = [
             "value is escaped or encoded, say so explicitly and record that as a negative "
             "result rather than a finding."
         ),
-        tools=["http_request", "compare_responses", "list_findings", "list_assets"],
+        tools=[
+            "http_request",
+            "compare_responses",
+            "list_findings",
+            "list_assets",
+            "list_worker_output",
+        ],
         permissions=_perms(
             [CAPABILITY_NETWORK, CAPABILITY_READ],
-            ["http_request", "compare_responses", "list_findings", "list_assets"],
+            [
+                "http_request",
+                "compare_responses",
+                "list_findings",
+                "list_assets",
+                "list_worker_output",
+            ],
         ),
         output_schema=AGENT_OUTPUT_SCHEMA,
         budget={"max_rounds": 6, "max_tool_calls": 40, "max_tokens": 120000, "max_wall_clock_seconds": 900},
@@ -542,10 +594,22 @@ BUILTIN_ROLES: list[AgentRole] = [
             "keys - demonstrating that the traversal is filtered is the goal, not reading "
             "the target's filesystem."
         ),
-        tools=["http_request", "compare_responses", "list_findings", "list_assets"],
+        tools=[
+            "http_request",
+            "compare_responses",
+            "list_findings",
+            "list_assets",
+            "list_worker_output",
+        ],
         permissions=_perms(
             [CAPABILITY_NETWORK, CAPABILITY_READ],
-            ["http_request", "compare_responses", "list_findings", "list_assets"],
+            [
+                "http_request",
+                "compare_responses",
+                "list_findings",
+                "list_assets",
+                "list_worker_output",
+            ],
         ),
         output_schema=AGENT_OUTPUT_SCHEMA,
         budget={"max_rounds": 6, "max_tool_calls": 40, "max_tokens": 120000, "max_wall_clock_seconds": 900},
@@ -579,10 +643,12 @@ BUILTIN_ROLES: list[AgentRole] = [
             "parse_document",
             "read_file",
             "run_command",
+            "list_worker_output",
         ],
         permissions=_perms(
             [CAPABILITY_NETWORK, CAPABILITY_READ, CAPABILITY_SHELL],
             [
+                "list_worker_output",
                 "http_request",
                 "compare_responses",
                 "list_assets",
@@ -623,10 +689,12 @@ BUILTIN_ROLES: list[AgentRole] = [
             "list_assets",
             "http_request",
             "parse_document",
+            "list_worker_output",
         ],
         permissions=_perms(
             [CAPABILITY_READ, CAPABILITY_SHELL, CAPABILITY_NETWORK],
             [
+                "list_worker_output",
                 "read_file",
                 "list_files",
                 "run_command",
@@ -646,7 +714,10 @@ BUILTIN_ROLES: list[AgentRole] = [
         title="Independent verification analyst",
         objective=(
             "Independently re-evaluate candidate findings, and reject or downgrade the ones "
-            "that do not hold up."
+            "that do not hold up. You are given each candidate together with the evidence "
+            "behind it: judge it from that evidence, and probe the target only where the "
+            "evidence is missing or contradicts the claim. Probing every candidate spends "
+            "the budget you need to record the verdicts."
         ),
         system_prompt=(
             "You verify candidate findings. Assume the proposing agent may be wrong - you "
@@ -659,7 +730,10 @@ BUILTIN_ROLES: list[AgentRole] = [
             "issue yourself with a safe request. If you cannot reproduce it, say so and "
             "mark it unverified or inconclusive rather than confirmed. Reject findings that "
             "do not hold up and explain why. An agreement between several agents is not "
-            "proof; only evidence is."
+            "proof; only evidence is. Record the verdict for a candidate with the "
+            "record_verdict tool as soon as you reach it, not at the end: a verdict that "
+            "only exists in prose never reaches the finding, and a run that spends its "
+            "whole budget investigating reaches none."
         ),
         tools=[
             "http_request",
@@ -667,13 +741,28 @@ BUILTIN_ROLES: list[AgentRole] = [
             "list_findings",
             "read_file",
             "list_assets",
+            "record_verdict",
+            "record_verdicts",
         ],
         permissions=_perms(
-            [CAPABILITY_NETWORK, CAPABILITY_READ],
-            ["http_request", "compare_responses", "list_findings", "read_file", "list_assets"],
+            [CAPABILITY_NETWORK, CAPABILITY_READ, CAPABILITY_VERIFY],
+            [
+                "http_request",
+                "compare_responses",
+                "list_findings",
+                "read_file",
+                "list_assets",
+                "record_verdict",
+                "record_verdicts",
+            ],
         ),
         output_schema=VERIFICATION_OUTPUT_SCHEMA,
-        budget={"max_rounds": 8, "max_tool_calls": 60, "max_tokens": 180000, "max_wall_clock_seconds": 1200},
+        budget={
+            "max_rounds": 20,
+            "max_tool_calls": 150,
+            "max_tokens": 600000,
+            "max_wall_clock_seconds": 1800,
+        },
         stage="verification",
     ),
     AgentRole(
@@ -694,12 +783,37 @@ BUILTIN_ROLES: list[AgentRole] = [
             "reasoning in one or two sentences. Where verification was not possible, say so "
             "explicitly rather than quietly presenting the hypothesis as fact. Produce the "
             "remediation advice for each confirmed finding, specific to the observed "
-            "component."
+            "component. Record the verdict you reach for a finding with the record_verdict "
+            "tool: a verdict that only exists in prose never reaches the finding. Every "
+            "finding carries its own evidence in the list_findings output - judge it from "
+            "there instead of searching the event log for it, and spend your rounds on the "
+            "verdicts rather than on the reading. The findings that wait for a verdict are "
+            "listed in the task context, each with the evidence that supports it and the "
+            "identifier you need to record its verdict: judge them from there, and record "
+            "every one of them in a single call to record_verdicts. A verdict per call "
+            "leaves a judge with fifty findings to judge without the budget to record them."
         ),
-        tools=["list_findings", "list_events", "read_file", "list_files"],
-        permissions=_perms([CAPABILITY_READ], ["list_findings", "list_events", "read_file", "list_files"]),
+        tools=[
+            "list_findings",
+            "list_events",
+            "read_file",
+            "list_files",
+            "record_verdict",
+            "record_verdicts",
+        ],
+        permissions=_perms(
+            [CAPABILITY_READ, CAPABILITY_VERIFY],
+            [
+                "list_findings",
+                "list_events",
+                "read_file",
+                "list_files",
+                "record_verdict",
+                "record_verdicts",
+            ],
+        ),
         output_schema=AGENT_OUTPUT_SCHEMA,
-        budget={"max_rounds": 6, "max_tool_calls": 30, "max_tokens": 120000, "max_wall_clock_seconds": 600},
+        budget={"max_rounds": 12, "max_tool_calls": 60, "max_tokens": 400000, "max_wall_clock_seconds": 1200},
         stage="reporting",
     ),
 ]

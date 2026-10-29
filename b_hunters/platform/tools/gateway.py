@@ -45,6 +45,9 @@ CAPABILITY_READ = "read_files"
 CAPABILITY_PACKAGE_INSTALL = "package_install"
 CAPABILITY_EXTERNAL_DOWNLOAD = "external_download"
 CAPABILITY_STATE_CHANGING = "state_changing"
+#: Recording what a verification established about a finding.  It is its
+#: own capability: a role that may judge a finding may not write files.
+CAPABILITY_VERIFY = "verify"
 
 KNOWN_CAPABILITIES = frozenset(
     {
@@ -55,6 +58,7 @@ KNOWN_CAPABILITIES = frozenset(
         CAPABILITY_PACKAGE_INSTALL,
         CAPABILITY_EXTERNAL_DOWNLOAD,
         CAPABILITY_STATE_CHANGING,
+        CAPABILITY_VERIFY,
     }
 )
 

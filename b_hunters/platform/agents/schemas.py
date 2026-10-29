@@ -276,7 +276,23 @@ class CandidateFinding:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> CandidateFinding:
         allowed = set(cls.__dataclass_fields__)
-        return cls(**{k: v for k, v in data.items() if k in allowed})
+        fields = {k: v for k, v in data.items() if k in allowed}
+        # The model writes the confidence as a word often enough - "high",
+        # "medium" - and the platform keeps a number.  A word means the
+        # model was unsure of the scale, not that the finding is worth
+        # more than the scale allows.
+        raw = fields.get("confidence", 0.5)
+        try:
+            fields["confidence"] = float(raw)
+        except (TypeError, ValueError):
+            fields["confidence"] = {
+                "critical": 1.0,
+                "high": 0.9,
+                "medium": 0.6,
+                "low": 0.3,
+                "info": 0.1,
+            }.get(str(raw).strip().lower(), 0.5)
+        return cls(**fields)
 
 
 def summarise_messages(messages: Sequence[AgentMessage], limit: int = 20) -> list[dict[str, Any]]:

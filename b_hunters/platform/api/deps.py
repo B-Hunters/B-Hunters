@@ -25,6 +25,7 @@ from ..db.repositories import (
     ToolCallRepository,
     UserRepository,
 )
+from ..db.worker_output_repository import WorkerOutputRepository
 from ..security.sessions import (
     Session,
     requires_csrf,
@@ -75,6 +76,8 @@ class Services:
         self.providers = ProviderRepository(self.db)
         self.agent_definitions = AgentDefinitionRepository(self.db)
         self.services = ServiceRepository(self.db)
+        #: What the scanner workers produced, saved per scan.
+        self.worker_output = WorkerOutputRepository(self.db)
         #: The active orchestrator registry, keyed by scan id.
         self.orchestrators: dict[str, Any] = {}
 
