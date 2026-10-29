@@ -161,7 +161,9 @@ services:
       - BHUNTERS_AGENT_MAX_TOOL_CALLS_PER_TASK=100
       - BHUNTERS_AGENT_MAX_ROUNDS=24
       - BHUNTERS_AGENT_WALL_CLOCK_SECONDS=1800
-    command: ["b-hunters", "runner"]
+    # The image's entry point is already `b-hunters`, so the command
+    # names the subcommand only.
+    command: ["runner"]
     volumes:
       - ./deploy/platform.ini:/etc/b-hunters/b-hunters.ini:ro
       # The agent workspaces are shared with the platform: the API
