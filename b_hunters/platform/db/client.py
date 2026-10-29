@@ -51,6 +51,10 @@ PLATFORM_COLLECTIONS = (
     "platform_benchmark_results",
     "platform_migrations",
     "platform_counters",
+    "platform_jobs",
+    "platform_target_locks",
+    "platform_issues",
+    "platform_runner_heartbeats",
 )
 
 
@@ -138,6 +142,7 @@ INDEXES: dict[str, list[IndexSpec]] = {
         IndexSpec([("first_seen_at", ASCENDING)], "by_first_seen"),
         IndexSpec([("confidence", ASCENDING)], "by_confidence"),
         IndexSpec([("detected_by", ASCENDING)], "by_detected_by"),
+        IndexSpec([("issue_id", ASCENDING)], "by_issue"),
     ],
     "platform_evidence": [
         IndexSpec([("finding_id", ASCENDING)], "by_finding"),
@@ -168,6 +173,33 @@ INDEXES: dict[str, list[IndexSpec]] = {
     ],
     "platform_counters": [
         IndexSpec([("key", ASCENDING)], "uniq_counter_key", unique=True),
+    ],
+    "platform_jobs": [
+        IndexSpec([("job_id", ASCENDING)], "uniq_job_id", unique=True),
+        IndexSpec(
+            [("status", ASCENDING), ("available_at", ASCENDING), ("priority", DESCENDING)],
+            "by_status_available",
+        ),
+        IndexSpec([("status", ASCENDING), ("lease_expires_at", ASCENDING)], "by_status_lease"),
+        IndexSpec([("kind", ASCENDING), ("created_at", ASCENDING)], "by_kind_created"),
+        IndexSpec([("payload.scan_id", ASCENDING)], "by_scan_id"),
+    ],
+    "platform_target_locks": [
+        IndexSpec([("target_key", ASCENDING)], "uniq_target_key", unique=True),
+        IndexSpec([("expires_at", ASCENDING)], "ttl_expires", expire_after_seconds=0),
+    ],
+    "platform_issues": [
+        IndexSpec(
+            [("target_key", ASCENDING), ("fingerprint", ASCENDING)],
+            "uniq_target_fingerprint",
+            unique=True,
+        ),
+        IndexSpec([("triage_status", ASCENDING), ("severity", ASCENDING)], "by_triage_severity"),
+        IndexSpec([("last_seen_at", DESCENDING)], "by_last_seen"),
+    ],
+    "platform_runner_heartbeats": [
+        IndexSpec([("runner_id", ASCENDING)], "uniq_runner_id", unique=True),
+        IndexSpec([("last_seen_at", DESCENDING)], "by_last_seen"),
     ],
 }
 
