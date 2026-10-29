@@ -9,6 +9,10 @@ The runner claims a job with an atomic update, leases it, and renews the
 lease (the heartbeat) while the job runs.  A runner that dies leaves the
 lease behind; when it expires, the job is claimed again and the scan is
 not lost.
+
+The runner also holds the lock of the target it works on: only one scan
+of a host runs at a time, because the scanner workers are a scarce
+resource.
 """
 
 from __future__ import annotations
@@ -29,6 +33,9 @@ log = logging.getLogger(__name__)
 
 #: The kinds of job the runner claims.
 RUNNER_JOB_KINDS = ("scan", "benchmark")
+
+#: How long a job waits for a target that is locked by somebody else.
+LOCK_RETRY_SECONDS = 30
 
 #: The counter key that tells the runner to drain.
 DRAIN_COUNTER_KEY = "runner:drain"
@@ -110,6 +117,11 @@ class Runner:
     async def run_once(self) -> Optional[dict[str, Any]]:
         """Claim one job, run it and record the outcome.
 
+        The runner takes the lock of the target before it runs a job, so
+        that only one scan of a host runs at a time.  A job whose target
+        is locked by somebody else is put back on the queue: it waits
+        for the target instead of competing for it.
+
         Returns the result of the job, the job document when the job
         failed, or ``None`` when there was nothing to do.
         """
@@ -126,10 +138,24 @@ class Runner:
             return None
 
         job_id = str(job.get("job_id", ""))
+        target_key = str((job.get("payload") or {}).get("target_key", "") or "")
         self._current_job_id = job_id
         self.record_heartbeat()
         heartbeat = asyncio.create_task(self._heartbeat_loop(job_id))
+        locked = False
         try:
+            if target_key:
+                locked = self.services.locks.acquire(
+                    target_key=target_key,
+                    owner=self.config.owner,
+                    ttl_seconds=self._lock_ttl_seconds(),
+                )
+                if not locked:
+                    # The target is busy: the job goes back to the queue
+                    # and waits for the lock instead of failing.
+                    log.info("the target %s is locked; the job %s waits", target_key, job_id)
+                    jobs.release(job_id, owner=self.config.owner, delay_seconds=LOCK_RETRY_SECONDS)
+                    return None
             result = await self.executor.execute(job)
         except Exception as exc:
             log.warning("job %s failed: %s", job_id, exc)
@@ -142,7 +168,14 @@ class Runner:
             heartbeat.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat
+            if locked:
+                self.services.locks.release(target_key=target_key, owner=self.config.owner)
             self._current_job_id = ""
+
+    def _lock_ttl_seconds(self) -> int:
+        """How long the lock of a target is held while a scan runs."""
+        lease = int(getattr(self.services.settings, "runner_lease_seconds", 60) or 60)
+        return max(1, lease * 5)
 
     async def _heartbeat_loop(self, job_id: str) -> None:
         """Renew the lease of the job in flight until the runner stops."""

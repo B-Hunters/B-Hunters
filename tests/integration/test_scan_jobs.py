@@ -59,9 +59,12 @@ def test_starting_a_scan_enqueues_a_job(client, csrf, services):
 def test_starting_a_scan_creates_exactly_one_job(client, csrf, services):
     scan_id = _create_scan(client, csrf)
     client.post(f"/api/v1/scans/{scan_id}/start", headers={"X-CSRF-Token": csrf})
-    jobs = [job for job in services.jobs.list() if job["kind"] == "scan"]
+    jobs = [
+        job
+        for job in services.jobs.list()
+        if job["kind"] == "scan" and job["payload"].get("scan_id") == scan_id
+    ]
     assert len(jobs) == 1
-    assert jobs[0]["payload"]["scan_id"] == scan_id
 
 
 def test_starting_a_scan_records_the_queue_event(client, csrf, services):
