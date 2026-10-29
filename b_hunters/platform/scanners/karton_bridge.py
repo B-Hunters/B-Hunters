@@ -100,6 +100,21 @@ _EXTRA_FIELD_WORKERS = {
 }
 
 
+def identity_from_queue(queue: str) -> str:
+    """The worker identity a bound queue belongs to.
+
+    Karton names the queues after the consumer that binds them:
+    ``normal:B-Hunters-Nuclei``.  The queue is therefore a second, and
+    more complete, record of who is online: a worker whose Redis client
+    is called ``redis-py`` is invisible in the client list and visible
+    here.
+    """
+    name = str(queue or "").strip()
+    if ":" in name:
+        name = name.rsplit(":", 1)[-1]
+    return name.strip()
+
+
 def worker_of_detector(detector: str) -> str:
     """The worker that writes the report field a finding names.
 
@@ -213,19 +228,45 @@ class KartonWorkerBridge:
     def online_identities(self) -> list[str]:
         """The identity of every consumer that is online right now.
 
-        The Redis client name *is* the worker identity, so the names the
-        backend reports are the identities.  A backend that cannot be
-        reached reports nothing: an unreachable backend is not evidence
-        that a worker is absent, and the caller records nothing rather
-        than recording "not connected".
+        Two sources are read, because neither is complete on its own:
+
+        * the **Redis client names** — Karton names its client after the
+          identity, but only some of the Karton versions in the fleet do
+          it, so a worker whose client is called ``redis-py`` is
+          invisible here;
+        * the **bound queues** — a worker that binds on a queue appears
+          in it, and the queue name carries the identity
+          (``normal:B-Hunters-Nuclei``).  This is what makes a worker
+          that consumed no task visible at all.
+
+        A backend that cannot be reached reports nothing: an unreachable
+        backend is not evidence that a worker is absent, and the caller
+        records nothing rather than recording "not connected".
         """
+        identities: set[str] = set()
         try:
             consumers = self.producer.backend.get_online_consumers()
+            identities.update(str(name).strip() for name in (consumers or {}))
         except Exception as exc:  # pragma: no cover - the backend may be down
             log.debug("could not read the online consumers: %s", exc)
             return []
-        identities = {str(name).strip() for name in (consumers or {})}
+
+        for queue in self._bound_queues():
+            identity = identity_from_queue(queue)
+            if identity:
+                identities.add(identity)
         return sorted(name for name in identities if name)
+
+    def _bound_queues(self) -> list[str]:
+        """The queues the workers are bound to."""
+        try:
+            from karton.core.inspect import KartonState
+
+            state = KartonState(self.producer.backend)
+            return list(state.queues.keys())
+        except Exception as exc:  # pragma: no cover - the backend may be down
+            log.debug("could not read the bound queues: %s", exc)
+            return []
 
     def worker_outcomes(self, scan_id: str) -> list[dict[str, Any]]:
         """What every worker did in a scan.
