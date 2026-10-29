@@ -91,15 +91,9 @@ REPORTING_ROLES = ("adjudicator",)
 #: left to do.
 SCAN_PHASES = ("workers", "agents", "verifying", "reporting", "completed")
 
-#: The share of the scan's duration the worker phase may use.  The agent
-#: roles run after it and need the rest: the workers are the slow part of
-#: a scan, and a request budget they have spent leaves the agents unable
-#: to reach the target they are supposed to reason about.
-WORKER_PHASE_SHARE = 0.5
-
-#: The share the agent phase gets.
-AGENT_PHASE_SHARE = 0.5
-
+#: The adapter that crawls the target.  It runs in the second native
+#: wave: it seeds itself from the URLs the fingerprinters recorded.
+ASSET_CRAWL_ADAPTER = "asset_crawl"
 
 #: How many candidate findings the verification role judges.  It re-checks
 #: each one it is given, and re-checking costs a request per candidate:
@@ -250,6 +244,7 @@ class ScanProfile:
                 "secret_scan",
                 "openapi_discovery",
                 "graphql_analysis",
+                "asset_crawl",
             ],
             max_concurrency=4,
         )
@@ -565,7 +560,9 @@ class ScanOrchestrator:
                     self.scans.set_phase(context.scan_id, self._phase_after(stage))
                     continue
                 if agent_scope is None:
-                    agent_scope = ScopeEnforcer(self._phase_policy(context, AGENT_PHASE_SHARE))
+                    agent_scope = ScopeEnforcer(
+                        self._phase_policy(context, 1 - self.settings.worker_phase_share)
+                    )
                 tokens_spent = await self._run_agent_tasks(
                     context,
                     self._tasks_for_stage(plan, stage),
@@ -621,6 +618,13 @@ class ScanOrchestrator:
         if not native_names:
             return
 
+        # The crawler seeds itself from the URLs the fingerprinters
+        # recorded, so it must run after them: a crawler that starts
+        # with an empty inventory misses everything the fingerprinters
+        # found.  Every other adapter runs in the first wave, together.
+        first_wave = sorted(name for name in native_names if name != ASSET_CRAWL_ADAPTER)
+        second_wave = sorted(name for name in native_names if name == ASSET_CRAWL_ADAPTER)
+
         semaphore = asyncio.Semaphore(max(1, context.profile.max_concurrency))
 
         async def run_one(name: str) -> None:
@@ -655,7 +659,8 @@ class ScanOrchestrator:
                     ),
                 )
 
-        await asyncio.gather(*(run_one(name) for name in sorted(native_names)))
+        await asyncio.gather(*(run_one(name) for name in first_wave))
+        await asyncio.gather(*(run_one(name) for name in second_wave))
 
     @staticmethod
     def _phase_policy(context: ScanContext, share: float) -> ScopePolicy:
@@ -766,7 +771,7 @@ class ScanOrchestrator:
         )
 
         started = time.monotonic()
-        budget = max(10.0, float(context.max_duration_seconds) * WORKER_PHASE_SHARE)
+        budget = max(10.0, float(context.max_duration_seconds) * self.settings.worker_phase_share)
         try:
             results = await asyncio.to_thread(self._run_workers, context, targets, budget)
         except Exception as exc:

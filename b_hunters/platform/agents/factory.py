@@ -30,6 +30,7 @@ def build_orchestrator(services: Services) -> ScanOrchestrator:
     from ..scanners.graphql_adapter import graphql_analysis_executor
     from ..scanners.karton_bridge import build_worker_bridge
     from ..scanners.native import (
+        asset_crawl_executor,
         dependency_analysis_executor,
         openapi_discovery_executor,
         secret_scan_executor,
@@ -49,6 +50,7 @@ def build_orchestrator(services: Services) -> ScanOrchestrator:
             "openapi_discovery": openapi_discovery_executor,
             "graphql_analysis": graphql_analysis_executor,
             "dependency_analysis": dependency_analysis_executor,
+            "asset_crawl": asset_crawl_executor,
         }
     )
 

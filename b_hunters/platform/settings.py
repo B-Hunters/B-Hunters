@@ -157,6 +157,11 @@ class Settings:
     #: the role declares.
     agent_max_tool_calls_per_task: int = 0
     agent_workspace_root: str = "/var/lib/b-hunters/workspaces"
+    #: The share of the scan's duration the worker phase may use.  The
+    #: agent roles get the rest: the workers are the slow part of a
+    #: scan, and a request budget they have spent leaves the agents
+    #: unable to reach the target they are supposed to reason about.
+    worker_phase_share: float = 0.7
     #: Whether a scan runs the independent verifier by default.  The
     #: verifier re-checks every candidate finding, which costs a request
     #: each, and the adjudicator judges the findings anyway, so it is off
@@ -307,6 +312,7 @@ def load_settings(
                 "scope_max_requests_per_second",
                 "scope_default_timeout",
                 "runner_poll_seconds",
+                "worker_phase_share",
             }:
                 values[f.name] = _as_float(raw, getattr(Settings, f.name))
             elif f.name in {"cors_origins", "trusted_proxy_headers", "trusted_artifact_hosts"}:
