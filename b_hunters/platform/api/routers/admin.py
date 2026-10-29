@@ -174,8 +174,10 @@ async def upsert_provider(
     document = payload.model_dump()
     existing = services.providers.get(payload.name)
     if existing and not document.get("api_key"):
-        # Keep the stored secret when the operator did not supply a new one.
-        document["api_key"] = existing.get("api_key", "")
+        # Keep the stored secret when the operator did not supply a new
+        # one.  The key is stored encrypted, so it is read back through
+        # the repository rather than from the document.
+        document["api_key"] = services.providers.secret_for(payload.name)
     services.providers.upsert(document)
     services.audit.record(
         action="provider.upsert",
@@ -225,7 +227,10 @@ async def provider_health(
     config = ProviderConfig(
         name=document.get("name", name),
         base_url=document.get("base_url", ""),
-        api_key=document.get("api_key", ""),
+        # The key is stored encrypted.  Reading the plaintext field here
+        # would send an empty credential and report the provider as
+        # unreachable.
+        api_key=services.providers.secret_for(name),
         model=document.get("model", ""),
         role_models=document.get("role_models", {}) or {},
         temperature=float(document.get("temperature", 0.0)),

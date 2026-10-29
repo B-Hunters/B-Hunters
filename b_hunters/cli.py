@@ -799,7 +799,8 @@ def _admin(args):
             ProviderConfig(
                 name=document.get("name", args.name),
                 base_url=document.get("base_url", ""),
-                api_key=document.get("api_key", ""),
+                # The key is stored encrypted; the repository decrypts it.
+                api_key=services.providers.secret_for(args.name),
                 model=document.get("model", ""),
                 role_models=document.get("role_models", {}) or {},
                 timeout_seconds=float(document.get("timeout_seconds", 30.0)),

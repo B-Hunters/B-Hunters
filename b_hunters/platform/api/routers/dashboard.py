@@ -197,7 +197,8 @@ async def _provider_health(services: Services) -> list[dict[str, Any]]:
         config = ProviderConfig(
             name=document.get("name", ""),
             base_url=document.get("base_url", ""),
-            api_key=document.get("api_key", ""),
+            # The key is stored encrypted; the repository decrypts it.
+            api_key=services.providers.secret_for(document.get("name", "")),
             model=document.get("model", ""),
             timeout_seconds=float(document.get("timeout_seconds", 30.0)),
         )
