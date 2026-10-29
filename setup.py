@@ -45,6 +45,8 @@ platform_requirements = [
     # pin is repeated here so that the platform extra carries it even
     # when the requirements file is reorganised.
     "cryptography>=42,<47",
+    # The scheduler parses the cron expressions of the schedules.
+    "croniter>=2,<7",
 ]
 
 setup(

@@ -14,6 +14,8 @@ argon2-cffi>=23.1
 jsonschema>=4.20
 # The encryption of the credentials stored at rest (AES-GCM).
 cryptography>=42,<47
+# The scheduler parses the cron expressions of the schedules.
+croniter>=2,<7
 # The agent runtime.  The framework drives the loop: the request cycle,
 # the tool calls, the usage accounting, the retries on a rate limit and
 # the structured output.  The workers do not use it.
