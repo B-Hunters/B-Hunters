@@ -23,6 +23,11 @@ table is read:
 A tool that ran and found nothing is reported as having run and found
 nothing.  It is never reported as absent, and it is never reported as a
 failure.
+
+The same rule governs the agents: a role that never started is reported
+as a role that never started, and a role that was cut off by the
+deadline is reported as ``wall_clock``.  Neither of them is ever
+reported as a success.
 """
 
 from __future__ import annotations
@@ -32,10 +37,16 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from ...agents.orchestrator import ScanProfile
+from ...agents.roles import builtin_roles
+from ...agents.schemas import stop_reason_for
 from ...scanners.worker_output import WORKER_IDENTITIES
 from ..deps import CurrentUser, Services, current_user, get_services
 
 router = APIRouter(prefix="/scans", tags=["assets"])
+
+#: The status of a role that never ran.  It is neither a success nor a
+#: failure: the role was planned and nothing happened.
+NOT_STARTED = "not_started"
 
 
 @router.get("/{scan_id}/participation")
@@ -48,16 +59,149 @@ async def scan_participation(
     scan = services.scans.get(scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="the scan does not exist")
+    return participation_report(services, scan)
 
-    workers = _worker_rows(services, scan_id)
+
+@router.get("/{scan_id}/agents/report")
+async def scan_agent_report(
+    scan_id: str,
+    user: CurrentUser = Depends(current_user),
+    services: Services = Depends(get_services),
+) -> dict[str, Any]:
+    """What every planned agent role did in the scan."""
+    scan = services.scans.get(scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="the scan does not exist")
+    return agent_report(services, scan)
+
+
+# ----------------------------------------------------------------------
+# The participation
+# ----------------------------------------------------------------------
+def participation_report(services: Services, scan: Any) -> dict[str, Any]:
+    """The participation of the tools of one scan.
+
+    The workers and the native adapters are counted separately and the
+    coverage line counts both, so a reader can tell how much of the
+    platform took part in the scan.
+    """
+    workers = _worker_rows(services, scan.scan_id)
     adapters = _adapter_rows(services, scan)
     return {
-        "scan_id": scan_id,
+        "scan_id": scan.scan_id,
         "workers": workers,
         "native_adapters": adapters,
         "coverage": _coverage(workers, adapters),
         "health": _health(workers),
     }
+
+
+# ----------------------------------------------------------------------
+# The agents
+# ----------------------------------------------------------------------
+def agent_report(services: Services, scan: Any) -> dict[str, Any]:
+    """The outcome of every planned role of one scan.
+
+    One row per role.  The row is built from the task the role ran: its
+    status, the reason it stopped, the rounds it took, the tool calls it
+    made, the tokens it spent and its conclusion.  The findings it
+    raised are counted from the stored findings, and the confirmed ones
+    are the findings a judge confirmed.
+
+    A role that was planned but never ran is reported as
+    ``not_started``: it did not succeed and it did not fail, and saying
+    anything else would be a lie.
+    """
+    tasks = [
+        task for task in services.tasks.list_for_scan(scan.scan_id) if str(task.get("kind", "")) == "agent"
+    ]
+    by_role: dict[str, list[dict[str, Any]]] = {}
+    for task in tasks:
+        role = str(task.get("agent_role", "") or "")
+        if not role:
+            continue
+        by_role.setdefault(role, []).append(task)
+
+    roles = list(dict.fromkeys(_planned_roles(scan) + sorted(by_role)))
+    rows = [_role_row(services, scan.scan_id, role, by_role.get(role, [])) for role in roles]
+
+    stop_reasons: dict[str, int] = {}
+    for row in rows:
+        reason = row["stop_reason"]
+        stop_reasons[reason] = stop_reasons.get(reason, 0) + 1
+
+    return {
+        "scan_id": scan.scan_id,
+        "roles": rows,
+        "stop_reasons": stop_reasons,
+        "built_in_roles": len(builtin_roles()),
+        "planned_roles": len(rows),
+    }
+
+
+def _planned_roles(scan: Any) -> list[str]:
+    """The roles the scan planned.
+
+    A scan that stores no profile runs the default one, which is what
+    the runner builds from the same document.
+    """
+    profile_data = (scan.definition or {}).get("profile") or {}
+    profile = ScanProfile.from_dict(profile_data) if profile_data else ScanProfile.default()
+    return [str(role) for role in profile.agent_roles]
+
+
+def _role_row(
+    services: Services,
+    scan_id: str,
+    role: str,
+    tasks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """One row per role: what it did and what it found."""
+    results = [task.get("result") or {} for task in tasks]
+    finished = [result for result in results if isinstance(result, dict) and result]
+    last = finished[-1] if finished else {}
+
+    status = str(last.get("status", "") or "")
+    stop_reason = str(last.get("stop_reason", "") or "")
+    if not finished:
+        # The role has a task but no result: it never finished.  What
+        # the task itself says is the truth here.
+        task_status = str((tasks[-1] if tasks else {}).get("status", "") or "")
+        if task_status in ("", "pending", "ready"):
+            status = NOT_STARTED
+            stop_reason = NOT_STARTED
+        else:
+            status = task_status
+            stop_reason = stop_reason_for(task_status)
+
+    raised, confirmed = _findings_of_role(services, scan_id, role)
+    conclusion = str(last.get("conclusion", "") or "")
+    return {
+        "role": role,
+        "tasks": len(tasks),
+        "status": status,
+        "stop_reason": stop_reason,
+        "rounds": sum(int(result.get("rounds", 0) or 0) for result in finished),
+        "tool_calls": sum(int(result.get("tool_calls_used", 0) or 0) for result in finished),
+        "tokens": sum(int(result.get("tokens_used", 0) or 0) for result in finished),
+        "findings_raised": raised,
+        "findings_confirmed": confirmed,
+        "conclusion": conclusion[:400],
+    }
+
+
+def _findings_of_role(services: Services, scan_id: str, role: str) -> tuple[int, int]:
+    """The findings a role raised, and the ones that were confirmed."""
+    if not role:
+        return 0, 0
+    raised = services.findings.list(scan_id, detected_by=role, limit=2000)
+    confirmed = services.findings.list(
+        scan_id,
+        detected_by=role,
+        verification_status=("confirmed",),
+        limit=2000,
+    )
+    return len(raised), len(confirmed)
 
 
 # ----------------------------------------------------------------------
