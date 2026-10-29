@@ -10,6 +10,7 @@ from typing import Any, Optional
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from ..db.client import Database, get_database
+from ..db.issues import IssueRepository
 from ..db.jobs import JobRepository, TargetLockRepository
 from ..db.repositories import (
     AgentDefinitionRepository,
@@ -74,7 +75,9 @@ class Services:
         self.agents = AgentStateRepository(self.db)
         self.messages = MessageRepository(self.db)
         self.tool_calls = ToolCallRepository(self.db)
-        self.findings = FindingRepository(self.db)
+        #: The durable issues the findings belong to.
+        self.issues = IssueRepository(self.db)
+        self.findings = FindingRepository(self.db, issues=self.issues)
         #: The encryption of the stored credentials.  ``None`` when the
         #: deployment has not configured a key yet.
         self.secret_box = SecretBox.from_settings(self.settings)

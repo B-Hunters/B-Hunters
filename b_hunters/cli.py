@@ -106,6 +106,7 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
     add_provider.add_argument('--concurrency', type=int, default=4)
     admin_sub.add_parser('list-providers', help=f"{Fore.YELLOW}List the configured model providers")
     admin_sub.add_parser('check-provider', help=f"{Fore.YELLOW}Check the connectivity of a provider").add_argument('name', type=str)
+    admin_sub.add_parser('migrate-issues', help=f"{Fore.YELLOW}Link existing findings to durable issues")
 
     bench_parser = subparsers.add_parser('bench', help=f"{Fore.CYAN}Vulnerable application benchmark laboratory")
     bench_sub = bench_parser.add_subparsers(dest='bench_command', required=True)
@@ -820,6 +821,25 @@ def _admin(args):
             return 1
 
         return asyncio.run(_check())
+
+    if args.admin_command == 'migrate-issues':
+        findings = services.db.collection("platform_findings")
+        linked = 0
+        for document in findings.find({"issue_id": {"$exists": False}}):
+            issue, _ = services.issues.upsert_for_finding(
+                scan_id=document.get("scan_id", ""),
+                fingerprint=document.get("fingerprint", ""),
+                title=document.get("title", ""),
+                severity=document.get("severity", "info"),
+                vuln_class=document.get("vuln_class", ""),
+            )
+            findings.update_one(
+                {"finding_id": document.get("finding_id")},
+                {"$set": {"issue_id": issue["issue_id"], "not_observed": False}},
+            )
+            linked += 1
+        logging.info(f"{Fore.GREEN}Linked {linked} finding(s) to a durable issue.")
+        return 0
 
     if args.admin_command == 'list-users':
         users = services.users.list_users()

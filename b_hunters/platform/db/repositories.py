@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from pymongo import DESCENDING
 from pymongo.errors import DuplicateKeyError
@@ -21,6 +21,12 @@ from pymongo.errors import DuplicateKeyError
 from ..security.passwords import hash_password, needs_rehash
 from ..security.sessions import hash_session_id
 from .client import Database
+
+if TYPE_CHECKING:
+    # The issue repository imports this module for the helpers above, so
+    # it is only imported for the type: a runtime import would be a
+    # cycle.
+    from .issues import IssueRepository
 
 SEVERITIES = ("critical", "high", "medium", "low", "info")
 VERIFICATION_STATUSES = ("confirmed", "likely", "unverified", "inconclusive", "rejected")
@@ -902,8 +908,11 @@ def compute_fingerprint(
 
 
 class FindingRepository:
-    def __init__(self, db: Database) -> None:
+    def __init__(self, db: Database, issues: IssueRepository | None = None) -> None:
         self._db = db
+        #: The durable issues the findings belong to.  ``None`` when the
+        #: container was built without one.
+        self._issues = issues
 
     @property
     def _col(self):
@@ -949,7 +958,7 @@ class FindingRepository:
         now = utcnow()
         existing = self._col.find_one({"scan_id": scan_id, "fingerprint": fingerprint})
         if existing is None:
-            document = {
+            document: dict[str, Any] = {
                 "finding_id": new_id(),
                 "scan_id": scan_id,
                 "fingerprint": fingerprint,
@@ -988,6 +997,7 @@ class FindingRepository:
                 created = True
                 for item in _as_evidence_items(evidence):
                     self._add_evidence(document["finding_id"], scan_id, item)
+                self._link_issue(document, scan_id=scan_id, title=title, vuln_class=vuln_class)
                 return document, created
 
         merged_detectors = list(dict.fromkeys(list(existing.get("detected_by", [])) + list(detected_by)))
@@ -1006,7 +1016,38 @@ class FindingRepository:
             for item in _as_evidence_items(evidence):
                 self._add_evidence(existing["finding_id"], scan_id, item)
         existing.update(updates)
+        self._link_issue(existing, scan_id=scan_id, title=title, vuln_class=vuln_class)
         return existing, False
+
+    def _link_issue(
+        self,
+        document: dict[str, Any],
+        *,
+        scan_id: str,
+        title: str,
+        vuln_class: str,
+    ) -> None:
+        """Attach the finding to the durable issue of its fingerprint.
+
+        The finding is the evidence of one scan, the issue is the thing
+        that survives it.  The finding records which issue it belongs to
+        so that the two can be found from each other.
+        """
+        if self._issues is None:
+            return
+        issue, _ = self._issues.upsert_for_finding(
+            scan_id=scan_id,
+            fingerprint=str(document.get("fingerprint", "")),
+            title=title,
+            severity=str(document.get("severity", "info")),
+            vuln_class=vuln_class,
+        )
+        issue_id = issue.get("issue_id", "")
+        self._col.update_one(
+            {"finding_id": document.get("finding_id")},
+            {"$set": {"issue_id": issue_id, "not_observed": False}},
+        )
+        document["issue_id"] = issue_id
 
     def _add_evidence(self, finding_id: str, scan_id: str, item: Any) -> None:
         """Record one piece of evidence for a finding.
