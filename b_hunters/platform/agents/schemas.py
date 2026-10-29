@@ -207,6 +207,28 @@ class AgentTask:
         return data
 
 
+#: Why a run stopped, and the status each reason comes from.  The
+#: reasons are the ones the report uses: a run that finished, a run
+#: that ran out of its budget, a run that ran out of its wall clock, a
+#: run that was cancelled and a run that failed.
+STOP_REASONS = {
+    "succeeded": "completed",
+    "budget_exhausted": "budget_exhausted",
+    "wall_clock": "wall_clock",
+    "cancelled": "cancelled",
+    "failed": "failed",
+}
+
+
+def stop_reason_for(status: str) -> str:
+    """Why a run with this status stopped.
+
+    The status decides the reason and nothing else does: an empty
+    error string says nothing, and a run without a reason is a failure.
+    """
+    return STOP_REASONS.get(str(status or ""), "failed")
+
+
 @dataclass
 class AgentRun:
     """The result of running one agent task."""
@@ -227,11 +249,22 @@ class AgentRun:
     next_step: str = ""
     disposition: Disposition = Disposition.COMPLETE
 
+    @property
+    def stop_reason(self) -> str:
+        """Why the run stopped.
+
+        The reason comes from the status of the run and from nothing
+        else: an empty error string is not a reason, and a run that
+        stopped without one is never reported as completed.
+        """
+        return stop_reason_for(self.status)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "role": self.role,
             "status": self.status,
+            "stop_reason": self.stop_reason,
             "conclusion": self.conclusion,
             "confidence": self.confidence.value,
             "findings": self.findings,

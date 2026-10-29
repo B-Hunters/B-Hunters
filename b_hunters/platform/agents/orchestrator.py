@@ -596,6 +596,12 @@ class ScanOrchestrator:
         self.scans.set_status(context.scan_id, "running")
         self._emit(context.scan_id, "scan.started", {"profile": context.profile.name})
 
+        # The scan has a deadline.  It is stored on the scan, so a scan
+        # that is picked up again knows how much of its time is left,
+        # and it is enforced: a role that did not start because the
+        # deadline passed is recorded as cut off, never as successful.
+        deadline = self._scan_deadline(context)
+
         scope = ScopeEnforcer(context.scope_policy())
         plan = self.build_plan(context)
 
@@ -650,6 +656,7 @@ class ScanOrchestrator:
                     agent_scope,
                     state,
                     spent=tokens_spent,
+                    deadline=deadline,
                 )
                 self.scans.set_phase(context.scan_id, self._phase_after(stage))
         except asyncio.CancelledError:
@@ -1303,6 +1310,7 @@ class ScanOrchestrator:
         scope: ScopeEnforcer,
         state: _StageState,
         spent: int = 0,
+        deadline: float = 0.0,
     ) -> int:
         """Execute the agent tasks of one stage.
 
@@ -1330,6 +1338,19 @@ class ScanOrchestrator:
         while pending:
             if self._is_cancelled(context.scan_id):
                 return tokens_spent
+
+            # The deadline of the scan.  A task that has not started
+            # when it passes is marked as cut off and never runs: a role
+            # that did not run is not a role that succeeded.  A task
+            # that already succeeded keeps its result - its work was
+            # done before the deadline passed.
+            if deadline and time.monotonic() >= deadline:
+                self._mark_tasks_cut_off(
+                    context,
+                    [task for task in pending.values() if not self._already_succeeded(task.task_id)],
+                    "the scan ran out of its time",
+                )
+                break
 
             ready = [
                 task
@@ -1375,8 +1396,7 @@ class ScanOrchestrator:
             todo: list[AgentTask] = []
             for task in batch:
                 pending.pop(task.task_id, None)
-                stored = self.tasks.get(task.task_id)
-                if stored is not None and stored.get("status") == "succeeded":
+                if self._already_succeeded(task.task_id):
                     completed.add(task.task_id)
                     self._emit(
                         context.scan_id,
@@ -1392,13 +1412,13 @@ class ScanOrchestrator:
             if not todo:
                 continue
 
-            results = await asyncio.gather(
-                *(
-                    self._run_agent_task(context, task, scope, roles, collaboration, candidates)
-                    for task in todo
-                ),
-                return_exceptions=True,
+            results, cut_off = await self._run_batch(
+                context, todo, scope, roles, collaboration, candidates, deadline
             )
+            if cut_off:
+                # The tasks that had not started are cut off as well.
+                self._mark_tasks_cut_off(context, list(pending.values()), "the scan ran out of its time")
+                break
 
             for task, result in zip(todo, results, strict=False):
                 if isinstance(result, BaseException):
@@ -1420,6 +1440,17 @@ class ScanOrchestrator:
                 if run.status == "succeeded":
                     self.tasks.set_status(task.task_id, "succeeded", result=run.to_dict())
                     completed.add(task.task_id)
+                elif run.status in ("wall_clock", "cancelled"):
+                    # The stop reason is the status of the task: a role
+                    # that was cut off is not a failure, and it is not a
+                    # success either.
+                    failed.add(task.task_id)
+                    self.tasks.set_status(
+                        task.task_id,
+                        run.status,
+                        error=run.error or f"the agent run ended with status '{run.status}'",
+                        result=run.to_dict(),
+                    )
                 else:
                     failed.add(task.task_id)
                     self.tasks.set_status(
@@ -1435,6 +1466,7 @@ class ScanOrchestrator:
                         "task_id": task.task_id,
                         "role": run.role,
                         "status": run.status,
+                        "stop_reason": run.to_dict().get("stop_reason", ""),
                         "conclusion": run.conclusion,
                         "tokens_used": run.tokens_used,
                         "tool_calls_used": run.tool_calls_used,
@@ -1458,6 +1490,98 @@ class ScanOrchestrator:
             collaboration.summary(),
         )
         return tokens_spent
+
+    async def _run_batch(
+        self,
+        context: ScanContext,
+        todo: list[AgentTask],
+        scope: ScopeEnforcer,
+        roles: dict[str, AgentRole],
+        collaboration: CollaborationState,
+        candidates: Sequence[CandidateFinding],
+        deadline: float,
+    ) -> tuple[list[Any], bool]:
+        """Run the tasks of one batch and stop them at the deadline.
+
+        The deadline is enforced here: a batch that is still running
+        when it passes is cancelled, and the tasks of it are recorded as
+        cut off rather than as successful.  The second value of the
+        result says whether the batch was cut off.
+        """
+        running = asyncio.gather(
+            *(self._run_agent_task(context, task, scope, roles, collaboration, candidates) for task in todo),
+            return_exceptions=True,
+        )
+        if not deadline:
+            return list(await running), False
+        try:
+            results = await asyncio.wait_for(running, timeout=max(0.0, deadline - time.monotonic()))
+        except asyncio.TimeoutError:
+            self._mark_tasks_cut_off(context, todo, "the scan ran out of its time")
+            return [], True
+        return list(results), False
+
+    def _mark_tasks_cut_off(
+        self,
+        context: ScanContext,
+        tasks: Sequence[AgentTask],
+        reason: str,
+    ) -> None:
+        """Record the tasks the deadline cut off.
+
+        A task that never started and a task that was cut off
+        mid-flight are both recorded as ``wall_clock``: neither of them
+        did what it was supposed to do, and neither of them may be
+        reported as a success.
+        """
+        for task in tasks:
+            self.tasks.set_status(
+                task.task_id,
+                "wall_clock",
+                error=reason,
+                result={
+                    "task_id": task.task_id,
+                    "role": task.role,
+                    "status": "wall_clock",
+                    "stop_reason": "wall_clock",
+                },
+            )
+            self._emit(
+                context.scan_id,
+                "task.wall_clock",
+                {"task_id": task.task_id, "role": task.role, "reason": reason},
+            )
+
+    def _scan_deadline(self, context: ScanContext) -> float:
+        """When the scan has to stop, as a monotonic timestamp.
+
+        The deadline is stored on the scan as an epoch timestamp, so a
+        scan that is picked up again knows how much of its time is left.
+        A scan that already carries a deadline keeps it: the time it
+        was given does not grow because it was interrupted.
+        """
+        stored = self._stored_deadline(context.scan_id)
+        if stored <= 0:
+            stored = time.time() + max(1, int(context.max_duration_seconds))
+            self.scans.update(context.scan_id, {"deadline_at": stored})
+        return time.monotonic() + max(0.0, stored - time.time())
+
+    def _stored_deadline(self, scan_id: str) -> float:
+        """The deadline the scan carries, or zero when it carries none."""
+        document = self.db.collection("platform_scans").find_one({"scan_id": scan_id}) or {}
+        try:
+            return float(document.get("deadline_at", 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _already_succeeded(self, task_id: str) -> bool:
+        """Did this task already do its work?
+
+        A task that succeeded keeps its result: the work it did is done,
+        and a deadline that passes afterwards does not undo it.
+        """
+        stored = self.tasks.get(task_id)
+        return bool(stored is not None and stored.get("status") == "succeeded")
 
     # ------------------------------------------------------------------
     # Phases

@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from pydantic_ai import Agent
-from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.exceptions import RunCancelled, RunTimedOut, UsageLimitExceeded
 from pydantic_ai.messages import TextPart
 from pydantic_ai.usage import UsageLimits
 
@@ -347,6 +347,39 @@ class AgentRuntime:
                     hypothesis=str(exc),
                     disposition=Disposition.BLOCKED,
                     rationale=f"run stopped: {exc}",
+                )
+            )
+        except RunTimedOut as exc:
+            # The wall clock of the task ran out.  It is a stop reason of
+            # its own: a role that was cut off is not a role that failed
+            # and certainly not one that succeeded.
+            run.status = "wall_clock"
+            run.error = "the task ran out of its wall clock"
+            log.info("the wall clock of %s ran out: %s", self.role.role, exc)
+            self._emit(
+                AgentMessage(
+                    scan_id=scan_id,
+                    task_id=task_id,
+                    sender_role=self.role.role,
+                    kind=MessageKind.BUDGET_EXHAUSTED,
+                    hypothesis=str(exc),
+                    disposition=Disposition.BLOCKED,
+                    rationale="run stopped: the wall clock of the task ran out",
+                )
+            )
+        except RunCancelled as exc:
+            run.status = "cancelled"
+            run.error = "the task was cancelled"
+            log.info("the run of %s was cancelled: %s", self.role.role, exc)
+            self._emit(
+                AgentMessage(
+                    scan_id=scan_id,
+                    task_id=task_id,
+                    sender_role=self.role.role,
+                    kind=MessageKind.ERROR,
+                    hypothesis=str(exc),
+                    disposition=Disposition.BLOCKED,
+                    rationale="run stopped: the run was cancelled",
                 )
             )
         except Exception as exc:
