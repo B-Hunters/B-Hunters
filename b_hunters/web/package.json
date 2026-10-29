@@ -1,0 +1,6 @@
+{
+  "name": "b-hunters-console",
+  "private": true,
+  "type": "module",
+  "description": "The platform console is native ES modules; there is no build step."
+}

@@ -58,7 +58,16 @@ setup(
     long_description=_read("README.md"),
     long_description_content_type="text/markdown",
     packages=find_packages(include=["b_hunters", "b_hunters.*"]),
-    package_data={"b_hunters": ["web/*.html", "web/*.js", "web/*.css", "web/*.svg"]},
+    package_data={
+        "b_hunters": [
+            "web/*.html",
+            "web/*.js",
+            "web/*.css",
+            "web/*.svg",
+            "web/js/*.js",
+            "web/js/views/*.js",
+        ]
+    },
     include_package_data=False,
     install_requires=core_requirements,
     extras_require={

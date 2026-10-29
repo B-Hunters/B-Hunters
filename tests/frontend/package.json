@@ -1,0 +1,6 @@
+{
+  "name": "b-hunters-frontend-tests",
+  "private": true,
+  "type": "module",
+  "description": "The console tests are ES modules too, so node runs them without a build step."
+}
