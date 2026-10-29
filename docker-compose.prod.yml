@@ -1,0 +1,234 @@
+# The B-Hunters platform in production.
+#
+# The development stack (docker-compose.platform.yml) publishes its
+# services and carries development credentials.  This overlay is what a
+# deployment looks like: TLS in front, no published database, secure
+# cookies, resource limits, and a backup.
+#
+#   docker compose --env-file ../.env -f docker-compose.prod.yml up -d
+#
+# The environment file needs BHUNTERS_SECRET_KEY, the credentials of the
+# data stores and the domain the certificate is for.
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: bhunter_caddy
+    <<: *restart
+    environment:
+      - BHUNTERS_DOMAIN=${BHUNTERS_DOMAIN:?set BHUNTERS_DOMAIN to the host the certificate is for}
+      - BHUNTERS_EMAIL=${BHUNTERS_EMAIL:-admin@example.com}
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - platform
+    networks:
+      - bhunter
+
+  platform:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: b-hunters-platform:1.2.0
+    container_name: bhunter_platform
+    <<: *restart
+    environment:
+      - BHUNTERS_ENVIRONMENT=production
+      - BHUNTERS_HOST=0.0.0.0
+      - BHUNTERS_PORT=8080
+      - BHUNTERS_BASE_URL=https://${BHUNTERS_DOMAIN}
+      # A production deployment is served over TLS, so the session
+      # cookie is marked secure and the browser is told to refuse it
+      # over plain HTTP.
+      - BHUNTERS_SESSION_COOKIE_SECURE=true
+      - BHUNTERS_SESSION_COOKIE_SAMESITE=Lax
+      - BHUNTERS_MONGO_URI=mongodb://${BHUNTERS_MONGO_USER}:${BHUNTERS_MONGO_PASSWORD}@mongo:27017/?authSource=admin
+      - BHUNTERS_MONGO_DB=${BHUNTERS_MONGO_DB:-b-hunters}
+      - BHUNTERS_KARTON_CONFIG_PATH=/etc/b-hunters/b-hunters.ini
+      - BHUNTERS_AGENT_WORKSPACE_ROOT=/var/lib/b-hunters/workspaces
+      - BHUNTERS_SECRET_KEY=${BHUNTERS_SECRET_KEY:?set BHUNTERS_SECRET_KEY in the environment file}
+      - BHUNTERS_LLM_NAME=${MINIMAX_NAME:-minimax}
+      - BHUNTERS_LLM_BASE_URL=${MINIMAX_HOST}
+      - BHUNTERS_LLM_API_KEY=${MINIMAX_KEY}
+      - BHUNTERS_LLM_MODEL=${MINIMAX_MODEL:-MINIMAX-M3.1-flash}
+    volumes:
+      - ./deploy/platform.ini:/etc/b-hunters/b-hunters.ini:ro
+      - workspaces:/var/lib/b-hunters
+    depends_on:
+      - mongo
+      - redis
+      - s3
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/readyz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: "2.0"
+    networks:
+      - bhunter
+
+  runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: b-hunters-platform:1.2.0
+    container_name: bhunter_runner
+    <<: *restart
+    command: ["runner"]
+    environment:
+      - BHUNTERS_ENVIRONMENT=production
+      - BHUNTERS_MONGO_URI=mongodb://${BHUNTERS_MONGO_USER}:${BHUNTERS_MONGO_PASSWORD}@mongo:27017/?authSource=admin
+      - BHUNTERS_MONGO_DB=${BHUNTERS_MONGO_DB:-b-hunters}
+      - BHUNTERS_KARTON_CONFIG_PATH=/etc/b-hunters/b-hunters.ini
+      - BHUNTERS_AGENT_WORKSPACE_ROOT=/var/lib/b-hunters/workspaces
+      # The same key as the platform: the API never decrypts, the
+      # runner does.
+      - BHUNTERS_SECRET_KEY=${BHUNTERS_SECRET_KEY:?set BHUNTERS_SECRET_KEY in the environment file}
+      - BHUNTERS_RUNNER_CONCURRENCY=${BHUNTERS_RUNNER_CONCURRENCY:-1}
+      - BHUNTERS_LLM_NAME=${MINIMAX_NAME:-minimax}
+      - BHUNTERS_LLM_BASE_URL=${MINIMAX_HOST}
+      - BHUNTERS_LLM_API_KEY=${MINIMAX_KEY}
+      - BHUNTERS_LLM_MODEL=${MINIMAX_MODEL:-MINIMAX-M3.1-flash}
+    volumes:
+      - ./deploy/platform.ini:/etc/b-hunters/b-hunters.ini:ro
+      - workspaces:/var/lib/b-hunters
+    depends_on:
+      - mongo
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "b-hunters runner status || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          # The browser and the reasoning model need room.
+          memory: 4g
+          cpus: "4.0"
+    networks:
+      - bhunter
+
+  # --- the data stores: no published port in a production deployment ---
+  mongo:
+    image: mongo:7.0.16
+    container_name: bhunter_mongo
+    <<: *restart
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${BHUNTERS_MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${BHUNTERS_MONGO_PASSWORD}
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand(\"ping\").ok'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+    networks:
+      - bhunter
+
+  redis:
+    image: redis:7.2.5-alpine
+    container_name: bhunter_redis
+    <<: *restart
+    command: ["redis-server", "--requirepass", "${BHUNTERS_REDIS_PASSWORD}", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$BHUNTERS_REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    environment:
+      - BHUNTERS_REDIS_PASSWORD=${BHUNTERS_REDIS_PASSWORD}
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    networks:
+      - bhunter
+
+  s3:
+    image: minio/minio:RELEASE.2024-09-13T20-26-02Z
+    container_name: bhunter_s3
+    <<: *restart
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${BHUNTERS_S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${BHUNTERS_S3_SECRET_KEY}
+    volumes:
+      - s3_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+    networks:
+      - bhunter
+
+  # --- the backup -------------------------------------------------------
+  # A dump of the database, mirrored into the artefact store.  It runs
+  # once a day and keeps the last fourteen.
+  backup:
+    image: mongo:7.0.16
+    container_name: bhunter_backup
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        while true; do
+          stamp=$$(date -u +%Y%m%dT%H%M%SZ)
+          mongodump --uri "mongodb://${BHUNTERS_MONGO_USER}:${BHUNTERS_MONGO_PASSWORD}@mongo:27017/?authSource=admin" \
+            --archive --gzip --output /backup/dump-$$stamp.archive.gz
+          aws s3 cp /backup/dump-$$stamp.archive.gz "s3://${BHUNTERS_S3_BUCKET}/backups/" --endpoint-url http://s3:9000 --no-verify-ssl || true
+          ls -1t /backup/dump-*.archive.gz 2>/dev/null | tail -n +15 | xargs -r rm -f
+          sleep 86400
+        done
+    environment:
+      - BHUNTERS_MONGO_USER=${BHUNTERS_MONGO_USER}
+      - BHUNTERS_MONGO_PASSWORD=${BHUNTERS_MONGO_PASSWORD}
+      - BHUNTERS_S3_BUCKET=${BHUNTERS_S3_BUCKET:-bhunters}
+      - AWS_ACCESS_KEY_ID=${BHUNTERS_S3_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${BHUNTERS_S3_SECRET_KEY}
+    volumes:
+      - ./backup:/backup
+    depends_on:
+      - mongo
+      - s3
+    networks:
+      - bhunter
+
+volumes:
+  mongo_data:
+  redis_data:
+  s3_data:
+  workspaces:
+  caddy_data:
+  caddy_config:
+
+networks:
+  bhunter:
+    name: bhunter
+    driver: bridge

@@ -1,0 +1,33 @@
+# The B-Hunters platform in production.
+#
+# Caddy terminates TLS and passes the traffic to the platform.  The
+# security headers are set here rather than in the application, because
+# they are the ones a browser must see on every response, including the
+# ones the static files serve.
+
+{
+	email {$BHUNTERS_EMAIL}
+}
+
+{$BHUNTERS_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		# The transport is TLS and stays TLS.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# The API and the console.
+	handle {
+		reverse_proxy platform:8080
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
