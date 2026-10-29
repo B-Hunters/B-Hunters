@@ -85,6 +85,12 @@ VERIFICATION_ROLES = ("verifier",)
 #: Roles that report.
 REPORTING_ROLES = ("adjudicator",)
 
+#: The phases of a scan.  The phase a scan records is the phase it is
+#: *about to run*: a scan that reached ``agents`` has done its workers
+#: and continues with the agents.  ``completed`` means there is nothing
+#: left to do.
+SCAN_PHASES = ("workers", "agents", "verifying", "reporting", "completed")
+
 #: The share of the scan's duration the worker phase may use.  The agent
 #: roles run after it and need the rest: the workers are the slow part of
 #: a scan, and a request budget they have spent leaves the agents unable
@@ -180,6 +186,29 @@ def _by_severity(candidates: Sequence[CandidateFinding]) -> list[CandidateFindin
         candidates,
         key=lambda c: (order.get(str(c.severity).lower(), 5), -float(c.confidence or 0)),
     )
+
+
+def _confidence_of(value: Any) -> float:
+    """The confidence of a stored finding, as a number."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.5
+
+
+@dataclass
+class _StageState:
+    """What the stages of a scan achieved so far.
+
+    The state is shared by the stages of one run: a task of a later
+    stage depends on the tasks of an earlier one, and the dependency is
+    only satisfied when the task before it finished.
+    """
+
+    #: The tasks that finished successfully.
+    completed: set[str] = field(default_factory=set)
+    #: The tasks that failed or were cancelled.
+    failed: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -482,7 +511,13 @@ class ScanOrchestrator:
     # Execution
     # ------------------------------------------------------------------
     async def run(self, context: ScanContext) -> dict[str, Any]:
-        """Execute the scan."""
+        """Execute the scan, or the part of it that is left.
+
+        The scan records the phase it reached.  A scan that is picked up
+        again - because the runner that was working on it died - starts
+        at that phase: the stages before it are not run a second time,
+        and the agent tasks that already succeeded are not run again.
+        """
         started = time.monotonic()
         self.scans.set_status(context.scan_id, "running")
         self._emit(context.scan_id, "scan.started", {"profile": context.profile.name})
@@ -492,9 +527,10 @@ class ScanOrchestrator:
 
         # Persist the plan as tasks, keeping the plan's task identifiers so
         # that the dependency graph, the agent runs and the persisted task
-        # records all refer to the same task.
+        # records all refer to the same task.  A task that already
+        # succeeded keeps its result and is not run again.
         for agent_task in plan:
-            self.tasks.create(
+            self.tasks.upsert(
                 scan_id=context.scan_id,
                 task_id=agent_task.task_id,
                 title=agent_task.title,
@@ -505,17 +541,39 @@ class ScanOrchestrator:
                 input={"objective": agent_task.objective, "target": agent_task.target},
             )
 
+        record = self.scans.get(context.scan_id)
+        phase = record.phase if record is not None else "pending"
+        stages = self._stages_from(phase)
+        state = _StageState()
+
         try:
             await self._wait_while_paused(context.scan_id)
-            await self._dispatch_scanners(context, scope)
-            await self._dispatch_workers(context, scope)
             # The agents get their own request budget.  The worker phase
             # runs first and the scope enforcer's duration budget covers
             # the whole scan, so a budget the workers have spent leaves the
             # agents unable to make a single request - they would reason
             # about a target they cannot reach.
-            scope = ScopeEnforcer(self._phase_policy(context, AGENT_PHASE_SHARE))
-            await self._run_agent_tasks(context, plan, scope)
+            agent_scope: Optional[ScopeEnforcer] = None
+            tokens_spent = 0
+            for stage in stages:
+                if self._is_cancelled(context.scan_id):
+                    break
+                if stage == "workers":
+                    await self._dispatch_scanners(context, scope)
+                    await self._dispatch_workers(context, scope)
+                    self._write_coverage(context)
+                    self.scans.set_phase(context.scan_id, self._phase_after(stage))
+                    continue
+                if agent_scope is None:
+                    agent_scope = ScopeEnforcer(self._phase_policy(context, AGENT_PHASE_SHARE))
+                tokens_spent = await self._run_agent_tasks(
+                    context,
+                    self._tasks_for_stage(plan, stage),
+                    agent_scope,
+                    state,
+                    spent=tokens_spent,
+                )
+                self.scans.set_phase(context.scan_id, self._phase_after(stage))
         except asyncio.CancelledError:
             self.scans.set_status(context.scan_id, "cancelled")
             self._emit(context.scan_id, "scan.cancelled", {"at": time.time()})
@@ -979,27 +1037,42 @@ class ScanOrchestrator:
     async def _run_agent_tasks(
         self,
         context: ScanContext,
-        plan: Sequence[AgentTask],
+        tasks: Sequence[AgentTask],
         scope: ScopeEnforcer,
-    ) -> None:
-        """Execute the agent task graph with dependency ordering."""
+        state: _StageState,
+        spent: int = 0,
+    ) -> int:
+        """Execute the agent tasks of one stage.
+
+        A task that already succeeded is not run again: its work is
+        done, its findings are persisted and its result is kept.  The
+        candidates of the stage are the findings that are already
+        stored, so a resumed stage continues with the work that is
+        left.
+
+        Returns the tokens the scan has spent so far.
+        """
         roles = builtin_roles()
-        pending = {task.task_id: task for task in plan}
-        completed: set[str] = set()
-        failed: set[str] = set()
+        pending = {task.task_id: task for task in tasks}
+        completed = state.completed
+        failed = state.failed
         #: The tokens the finished roles have spent.
-        tokens_spent = 0
+        tokens_spent = spent
         collaboration = CollaborationState()
-        candidates: list[CandidateFinding] = []
+        candidates: list[CandidateFinding] = self._candidates_from_findings(context.scan_id)
+        #: The tasks of this stage.  A dependency that belongs to an
+        #: earlier stage is satisfied already: the stage that ran it is
+        #: over.
+        stage_ids = set(pending)
 
         while pending:
             if self._is_cancelled(context.scan_id):
-                return
+                return tokens_spent
 
             ready = [
                 task
                 for task in pending.values()
-                if all(dep in completed or dep in failed for dep in task.depends_on)
+                if all(dep in completed or dep in failed or dep not in stage_ids for dep in task.depends_on)
             ]
             if not ready:
                 # Every remaining task depends on something that failed:
@@ -1023,7 +1096,7 @@ class ScanOrchestrator:
             # when it is spent, the roles that have not started are
             # stopped rather than started and cut off.
             if tokens_spent >= self.settings.agent_max_tokens_per_scan > 0:
-                for task in pending.values():
+                for task in list(pending.values()):
                     self.tasks.set_status(
                         task.task_id,
                         "blocked",
@@ -1035,16 +1108,37 @@ class ScanOrchestrator:
                     pending.pop(task.task_id, None)
                 break
 
+            # A task that already succeeded is not run again: the work it
+            # did is done and its findings are already persisted.
+            todo: list[AgentTask] = []
+            for task in batch:
+                pending.pop(task.task_id, None)
+                stored = self.tasks.get(task.task_id)
+                if stored is not None and stored.get("status") == "succeeded":
+                    completed.add(task.task_id)
+                    self._emit(
+                        context.scan_id,
+                        "task.skipped",
+                        {
+                            "task_id": task.task_id,
+                            "role": task.role,
+                            "reason": "the task already succeeded",
+                        },
+                    )
+                    continue
+                todo.append(task)
+            if not todo:
+                continue
+
             results = await asyncio.gather(
                 *(
                     self._run_agent_task(context, task, scope, roles, collaboration, candidates)
-                    for task in batch
+                    for task in todo
                 ),
                 return_exceptions=True,
             )
 
-            for task, result in zip(batch, results, strict=False):
-                pending.pop(task.task_id, None)
+            for task, result in zip(todo, results, strict=False):
                 if isinstance(result, BaseException):
                     failed.add(task.task_id)
                     log.error(
@@ -1100,6 +1194,100 @@ class ScanOrchestrator:
             context.scan_id,
             "collaboration.summary",
             collaboration.summary(),
+        )
+        return tokens_spent
+
+    # ------------------------------------------------------------------
+    # Phases
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _stages_from(phase: str) -> list[str]:
+        """The stages of a scan that still have to run.
+
+        The recorded phase is the phase the scan is *about to run*, so
+        the stages before it are done.
+        """
+        start = SCAN_PHASES.index(phase) if phase in SCAN_PHASES else 0
+        return [stage for stage in SCAN_PHASES[:-1] if SCAN_PHASES.index(stage) >= start]
+
+    @staticmethod
+    def _phase_after(stage: str) -> str:
+        """The phase a scan is in after the given stage."""
+        return {
+            "workers": "agents",
+            "agents": "verifying",
+            "verifying": "reporting",
+            "reporting": "completed",
+        }.get(stage, "completed")
+
+    @staticmethod
+    def _tasks_for_stage(plan: Sequence[AgentTask], stage: str) -> list[AgentTask]:
+        """The tasks of the plan that belong to a stage."""
+        roles = {
+            "agents": HYPOTHESIS_ROLES,
+            "verifying": VERIFICATION_ROLES,
+            "reporting": REPORTING_ROLES,
+        }.get(stage, ())
+        return [task for task in plan if task.role in roles]
+
+    def _candidates_from_findings(self, scan_id: str) -> list[CandidateFinding]:
+        """The findings of a scan, as the candidates of the stage.
+
+        A resumed stage finds its candidates from the findings that are
+        already stored: the work of the earlier stages is not done
+        again, but its result is still there.
+        """
+        try:
+            rows = self.findings.list(scan_id, limit=2000)
+        except Exception:  # pragma: no cover - the database may be down
+            log.exception("failed to list the findings of the scan %s", scan_id)
+            return []
+        candidates: list[CandidateFinding] = []
+        for row in rows:
+            vuln_class = str(row.get("vuln_class", "") or "")
+            if not vuln_class:
+                continue
+            candidates.append(
+                CandidateFinding(
+                    title=str(row.get("title", "")),
+                    summary=str(row.get("summary", "")),
+                    vuln_class=vuln_class,
+                    severity=str(row.get("severity", "info")),
+                    host=str(row.get("host", "")),
+                    path=str(row.get("path", "")),
+                    parameter=str(row.get("parameter", "")),
+                    confidence=_confidence_of(row.get("confidence")),
+                    evidence=list(row.get("evidence", []) or []),
+                )
+            )
+        return candidates
+
+    def _write_coverage(self, context: ScanContext) -> None:
+        """Record what the scan covered.
+
+        The summary says how much of the target the scan reached, so
+        that a report can say what was looked at and what was not.
+        """
+        try:
+            rows = self.services.list_for_scan(context.scan_id)
+        except Exception:  # pragma: no cover - the database may be down
+            log.exception("failed to list the services of the scan %s", context.scan_id)
+            return
+        hosts = {str(row.get("host", "")) for row in rows if row.get("host")}
+        tasks = self.tasks.list_for_scan(context.scan_id)
+        self.scans.set_coverage(
+            context.scan_id,
+            {
+                "hosts": len(hosts),
+                "urls": len(rows),
+                "worker_tasks_succeeded": sum(
+                    1 for task in tasks if task.get("kind") == "worker" and task.get("status") == "succeeded"
+                ),
+                "worker_tasks_failed": sum(
+                    1 for task in tasks if task.get("kind") == "worker" and task.get("status") == "failed"
+                ),
+                "authenticated": False,
+            },
         )
 
     def _pending_verdicts(self, scan_id: str) -> list[dict[str, Any]]:

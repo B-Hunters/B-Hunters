@@ -89,3 +89,25 @@ def test_stopping_a_queued_scan_cancels_its_job(client, csrf, services):
     assert response.status_code == 200
     assert services.jobs.get(started["job_id"])["status"] == "cancelled"
     assert services.scans.get(scan_id).status in {"stopping", "cancelled"}
+
+
+def test_a_created_scan_carries_its_keys(client, csrf, services):
+    scan_id = _create_scan(client, csrf)
+    scan = services.scans.get(scan_id)
+    assert len(scan.target_key) == 32
+    assert len(scan.comparison_key) == 32
+    public = scan.public()
+    assert public["target_key"] == scan.target_key
+    assert public["comparison_key"] == scan.comparison_key
+    assert public["phase"] == "pending"
+    assert public["coverage"] == {}
+
+
+def test_the_job_carries_the_target_key_of_the_scan(client, csrf, services):
+    scan_id = _create_scan(client, csrf)
+    started = client.post(f"/api/v1/scans/{scan_id}/start", headers={"X-CSRF-Token": csrf}).json()
+    job = services.jobs.get(started["job_id"])
+    scan = services.scans.get(scan_id)
+    assert scan.target_key
+    # The runner takes the lock of the target from the job payload.
+    assert job["payload"]["target_key"] == scan.target_key

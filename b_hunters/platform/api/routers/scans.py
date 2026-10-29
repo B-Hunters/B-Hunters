@@ -15,6 +15,7 @@ from ...agents.orchestrator import (
     VERIFICATION_ROLES,
     ScanProfile,
 )
+from ...scan_keys import compute_comparison_key, compute_target_key
 from ...scanners import worker_output
 from ...security.scope import ScopeEnforcer, build_policy_from_scan
 from ..deps import (
@@ -410,6 +411,22 @@ async def create_scan(
         "max_duration_seconds": payload.max_duration_seconds,
     }
 
+    # The identity of the target, and of what the scan does to it.  The
+    # two keys say whether two scans may be compared with each other.
+    target_key = compute_target_key(
+        authorized_hosts=result["authorized_hosts"],
+        targets=result["accepted_urls"],
+    )
+    comparison_key = compute_comparison_key(
+        target_key=target_key,
+        excluded_paths=payload.targets.excluded_paths,
+        profile=profile.name,
+        scanners=profile.scanners,
+        agent_roles=profile.agent_roles,
+        # The identity vault arrives in phase 2a.
+        identity_ids=[],
+    )
+
     record = services.scans.create(
         {
             "name": payload.name,
@@ -419,6 +436,8 @@ async def create_scan(
             "definition": definition,
             "scope": scope,
             "stats": {},
+            "target_key": target_key,
+            "comparison_key": comparison_key,
         }
     )
     services.events.append(

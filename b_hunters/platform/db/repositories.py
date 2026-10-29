@@ -242,6 +242,16 @@ class ScanRecord:
     #: The task counters from before the scan, so that the workers that
     #: took part in it can be told apart while it is still running.
     workers_before: dict[str, int] = field(default_factory=dict)
+    #: The phase the scan reached.  A scan that is picked up again
+    #: resumes at this phase instead of starting over.
+    phase: str = "pending"
+    #: What the scan covered: hosts, urls and worker tasks.
+    coverage: dict[str, Any] = field(default_factory=dict)
+    #: The stable identity of the target the scan runs against.
+    target_key: str = ""
+    #: The identity of what the scan did to the target.  Two scans may
+    #: only be compared when this key is the same.
+    comparison_key: str = ""
 
     @classmethod
     def from_document(cls, doc: dict[str, Any]) -> ScanRecord:
@@ -258,6 +268,10 @@ class ScanRecord:
             error=doc.get("error", ""),
             workers={k: int(v) for k, v in (doc.get("workers") or {}).items()},
             workers_before={k: int(v) for k, v in (doc.get("workers_before") or {}).items()},
+            phase=doc.get("phase", "pending") or "pending",
+            coverage=dict(doc.get("coverage") or {}),
+            target_key=doc.get("target_key", "") or "",
+            comparison_key=doc.get("comparison_key", "") or "",
         )
 
     def public(self) -> dict[str, Any]:
@@ -273,6 +287,10 @@ class ScanRecord:
             "scope": self.scope,
             "error": self.error,
             "workers": self.workers,
+            "phase": self.phase,
+            "coverage": self.coverage,
+            "target_key": self.target_key,
+            "comparison_key": self.comparison_key,
         }
 
 
@@ -353,6 +371,26 @@ class ScanRepository:
         payload = {f"stats.{key}": value for key, value in stats.items()}
         payload["updated_at"] = utcnow()
         self._col.update_one({"scan_id": scan_id}, {"$set": payload})
+
+    def set_phase(self, scan_id: str, phase: str) -> bool:
+        """Record the phase the scan reached.
+
+        The phase is the checkpoint a resumed scan starts from: a scan
+        that is picked up again continues at the phase it reached
+        instead of running the stages before it a second time.
+        """
+        result = self._col.update_one(
+            {"scan_id": scan_id},
+            {"$set": {"phase": phase, "updated_at": utcnow()}},
+        )
+        return result.matched_count > 0
+
+    def set_coverage(self, scan_id: str, coverage: dict[str, Any]) -> bool:
+        """Record what the scan covered."""
+        payload = {f"coverage.{key}": value for key, value in (coverage or {}).items()}
+        payload["updated_at"] = utcnow()
+        result = self._col.update_one({"scan_id": scan_id}, {"$set": payload})
+        return result.matched_count > 0
 
 
 # ----------------------------------------------------------------------
@@ -458,6 +496,56 @@ class TaskRepository:
 
     def get(self, task_id: str) -> Optional[dict[str, Any]]:
         return self._col.find_one({"task_id": task_id})
+
+    def upsert(
+        self,
+        *,
+        scan_id: str,
+        task_id: str,
+        title: str,
+        kind: str = "agent",
+        agent_role: str = "",
+        depends_on: Sequence[str] = (),
+        budget: dict[str, Any] | None = None,
+        input: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create the task, or reset the one that is already there.
+
+        A task that already succeeded keeps its status and its result:
+        the work it did is done, and running it again would spend the
+        tokens twice.  Every other task is reset, so that a resumed
+        scan runs it.
+        """
+        existing = self._col.find_one({"task_id": task_id})
+        if existing is None:
+            return self.create(
+                scan_id=scan_id,
+                task_id=task_id,
+                title=title,
+                kind=kind,
+                agent_role=agent_role,
+                depends_on=depends_on,
+                budget=budget,
+                input=input,
+            )
+        payload: dict[str, Any] = {
+            "title": title,
+            "budget": budget or {},
+            "input": input or {},
+            "updated_at": utcnow(),
+        }
+        if existing.get("status") != "succeeded":
+            payload.update(
+                {
+                    "status": "pending",
+                    "result": None,
+                    "error": "",
+                    "finished_at": None,
+                    "attempts": 0,
+                }
+            )
+        self._col.update_one({"task_id": task_id}, {"$set": payload})
+        return self._col.find_one({"task_id": task_id}) or dict(existing)
 
     def list_for_scan(self, scan_id: str, status: str = "") -> list[dict[str, Any]]:
         query: dict[str, Any] = {"scan_id": scan_id}
