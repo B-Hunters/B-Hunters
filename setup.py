@@ -37,7 +37,14 @@ core_requirements = _requirements("requirements.txt")
 platform_requirements = [
     requirement
     for requirement in core_requirements
-    if not requirement.startswith(("karton-core", "pymongo", "tldextract", "requests", "colorama"))
+    if not requirement.startswith(
+        ("karton-core", "pymongo", "tldextract", "requests", "colorama", "cryptography")
+    )
+] + [
+    # The secret box encrypts the stored credentials with AES-GCM.  The
+    # pin is repeated here so that the platform extra carries it even
+    # when the requirements file is reorganised.
+    "cryptography>=42,<47",
 ]
 
 setup(

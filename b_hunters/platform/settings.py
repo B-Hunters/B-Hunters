@@ -111,6 +111,26 @@ class Settings:
     bootstrap_admin_username: str = "admin"
     bootstrap_admin_password: str = ""
 
+    # --- runner / secrets -------------------------------------------------
+    #: The deployment key that encrypts the stored credentials.  It is a
+    #: base64 encoded 32 byte value.  An empty key means the deployment
+    #: has not configured one yet and the secrets are stored in the clear.
+    secret_key: str = ""
+    #: How many jobs the runner works on at the same time.
+    runner_concurrency: int = 1
+    #: How long a claimed job stays leased before another runner may take it.
+    runner_lease_seconds: int = 60
+    #: How often the runner renews the lease of the job it is working on.
+    runner_heartbeat_seconds: int = 10
+    #: How long the runner waits for a new job when the queue is empty.
+    runner_poll_seconds: float = 2.0
+    #: How long a draining runner waits for the job it is working on.
+    runner_shutdown_grace_seconds: int = 300
+    #: How often a failed job is retried before it is given up on.
+    job_max_attempts: int = 3
+    #: How many scans may miss an issue before it is closed automatically.
+    auto_close_misses: int = 2
+
     # --- LLM providers ---------------------------------------------------
     llm_default_base_url: str = ""
     llm_default_model: str = ""
@@ -274,12 +294,19 @@ def load_settings(
                 "scope_max_duration_seconds",
                 "artifact_retention_days",
                 "event_retention_days",
+                "runner_concurrency",
+                "runner_lease_seconds",
+                "runner_heartbeat_seconds",
+                "runner_shutdown_grace_seconds",
+                "job_max_attempts",
+                "auto_close_misses",
             }:
                 values[f.name] = _as_int(raw, getattr(Settings, f.name))
             elif f.name in {
                 "llm_timeout_seconds",
                 "scope_max_requests_per_second",
                 "scope_default_timeout",
+                "runner_poll_seconds",
             }:
                 values[f.name] = _as_float(raw, getattr(Settings, f.name))
             elif f.name in {"cors_origins", "trusted_proxy_headers", "trusted_artifact_hosts"}:
