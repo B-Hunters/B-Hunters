@@ -24,7 +24,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urljoin, urlsplit
 
+from ..assets import classify, is_external, normalise_url
+from ..db.assets import AssetRepository
 from ..db.client import Database
 from ..db.repositories import (
     AgentStateRepository,
@@ -190,6 +193,77 @@ def _confidence_of(value: Any) -> float:
         return 0.5
 
 
+def _scope_of(url: str, authorized_hosts: Sequence[str]) -> str:
+    """Whether a URL belongs to the target or to another host."""
+    return "external" if is_external(url, authorized_hosts) else "first_party"
+
+
+def _resolve_against_target(value: str, primary_target: str) -> str:
+    """Resolve a reference the workers found against the scan's target."""
+    text = (value or "").strip()
+    if not text or not primary_target:
+        return ""
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return ""
+    if parts.scheme:
+        # Only an HTTP URL is an asset.  A mail address or a script is not.
+        if parts.scheme not in ("http", "https"):
+            return ""
+        return normalise_url(text)
+    if not primary_target.endswith("/"):
+        primary_target = f"{primary_target}/"
+    try:
+        return normalise_url(urljoin(primary_target, text))
+    except ValueError:
+        return ""
+
+
+def _asset_row_of_worker_item(
+    item: dict[str, Any],
+    primary_target: str,
+    authorized_hosts: Sequence[str],
+) -> dict[str, Any] | None:
+    """The asset one item of the worker output is, if it is one at all.
+
+    A worker writes a list of URLs or a list of paths as one entry.  The
+    URLs are URLs; the paths are paths of the target and are resolved
+    against it.  Everything else - a secret, a port, a finding - is not an
+    asset.
+    """
+    kind = str(item.get("kind", ""))
+    value = str(item.get("value", "")).strip()
+    worker = str(item.get("worker", ""))
+    if kind not in ("url", "item", "path") or not value:
+        return None
+
+    url = _resolve_against_target(value, primary_target)
+    if not url:
+        return None
+
+    if kind == "path":
+        # A path is never fetched, so it has no status.
+        return {
+            "url": url,
+            "kind": classify(url=url),
+            "scope": _scope_of(url, authorized_hosts),
+            "status_code": 0,
+            "source": worker,
+        }
+
+    # The JavaScript scanner writes the scripts it read; they are
+    # JavaScript whatever their name says.
+    asset_kind = "js" if "jsscanner" in worker.lower() else classify(url=url)
+    return {
+        "url": url,
+        "kind": asset_kind,
+        "scope": _scope_of(url, authorized_hosts),
+        "status_code": 0,
+        "source": worker,
+    }
+
+
 @dataclass
 class _StageState:
     """What the stages of a scan achieved so far.
@@ -352,6 +426,9 @@ class ScanOrchestrator:
         self.tool_calls = ToolCallRepository(database)
         self.services = ServiceRepository(database)
         self.worker_output = WorkerOutputRepository(database)
+        #: The URLs the scan saw.  Every tool that found one writes into
+        #: the same row.
+        self.assets = AssetRepository(database)
         self.provider_factory = provider_factory
         self.tool_registry = tool_registry or ToolRegistry()
         self.scanner_registry = scanner_registry or AdapterRegistry()
@@ -749,7 +826,18 @@ class ScanOrchestrator:
         request itself: it publishes the task and reads back what the
         workers wrote into the report document.  Only targets the scan
         scope already covers are handed to them.
+
+        The asset inventory is folded together when the worker phase is
+        over, whether or not a worker stack was reachable: the crawler
+        and the fingerprinters found URLs either way.
         """
+        try:
+            await self._run_karton_workers(context, scope)
+        finally:
+            self._merge_assets(context, self._primary_target(context))
+
+    async def _run_karton_workers(self, context: ScanContext, scope: ScopeEnforcer) -> None:
+        """Publish the targets to the Karton workers and collect what they found."""
         if self.worker_bridge is None:
             return
 
@@ -897,6 +985,80 @@ class ScanOrchestrator:
         saved = self.worker_output.replace_for_scan(context.scan_id, rows)
         log.info("saved %s item(s) of worker output for %s", saved, context.scan_id)
 
+    def _merge_assets(self, context: ScanContext, primary_target: str) -> dict[str, int]:
+        """Fold what was found into the asset inventory.
+
+        Three sources feed the inventory: the rows the crawler wrote,
+        the items the scanner workers produced and the URLs the
+        fingerprinters identified.  They are merged by the normalised
+        URL, so a URL the crawler and katana both saw is one row that
+        names both - not two rows that say the same thing.
+
+        A path a worker found is a URL of the target it was found on, and
+        a URL that was never fetched has no status.
+        """
+        from_workers = 0
+        from_services = 0
+
+        try:
+            items = self.worker_output.list_for_scan(context.scan_id, limit=5000)
+        except Exception:  # pragma: no cover - the database may be down
+            log.exception("failed to list the worker output of the scan %s", context.scan_id)
+            items = []
+
+        for item in items:
+            row = _asset_row_of_worker_item(item, primary_target, context.authorized_hosts)
+            if row is None:
+                continue
+            self.assets.upsert(
+                scan_id=context.scan_id,
+                url=row["url"],
+                kind=row["kind"],
+                scope=row["scope"],
+                status_code=row["status_code"],
+                source=row["source"],
+            )
+            from_workers += 1
+
+        try:
+            services = self.services.list_for_scan(context.scan_id)
+        except Exception:  # pragma: no cover - the database may be down
+            log.exception("failed to list the services of the scan %s", context.scan_id)
+            services = []
+
+        for service in services:
+            url = normalise_url(str(service.get("url", "")))
+            if not url:
+                continue
+            self.assets.upsert(
+                scan_id=context.scan_id,
+                url=url,
+                kind=classify(url=url),
+                scope=_scope_of(url, context.authorized_hosts),
+                status_code=int(service.get("status_code", 0) or 0),
+                host=str(service.get("host", "")),
+                source="service_fingerprint",
+            )
+            from_services += 1
+
+        counts = {
+            "assets": self.assets.count(context.scan_id),
+            "from_workers": from_workers,
+            "from_services": from_services,
+        }
+        self._emit(context.scan_id, "assets.merged", dict(counts))
+        return counts
+
+    @staticmethod
+    def _primary_target(context: ScanContext) -> str:
+        """The target the scan is about."""
+        for target in context.targets:
+            text = str(target or "").strip()
+            if not text:
+                continue
+            return text if "://" in text else f"https://{text}"
+        return ""
+
     def _record_participation(self, context: ScanContext, before: dict[str, int]) -> None:
         """Record which workers took part in this scan.
 
@@ -977,6 +1139,23 @@ class ScanOrchestrator:
 
         for item in result.items:
             if not isinstance(item, dict):
+                continue
+
+            # The asset inventory.  The crawler records one row per URL
+            # it saw; the row is metadata only.
+            if name == ASSET_CRAWL_ADAPTER and result.kind == "url":
+                self.assets.upsert(
+                    scan_id=context.scan_id,
+                    url=str(item.get("value", "")),
+                    kind=str(item.get("kind", "other")),
+                    scope=str(item.get("scope", "first_party")),
+                    status_code=int(item.get("status_code", 0) or 0),
+                    content_type=str(item.get("content_type", "")),
+                    size_bytes=int(item.get("size_bytes", 0) or 0),
+                    depth=int(item.get("depth", 0) or 0),
+                    source=name,
+                    discovered_from=str(item.get("discovered_from", "")),
+                )
                 continue
 
             # The service inventory is stored per URL, not as findings.
