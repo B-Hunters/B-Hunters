@@ -108,7 +108,22 @@ LIST_ASSETS_SCHEMA = {
     "properties": {
         "kind": {
             "type": "string",
-            "enum": ["", "url", "route", "host", "technology", "javascript"],
+            "enum": [
+                "",
+                # The names the tool used before.  They ask for everything.
+                "url",
+                "route",
+                "host",
+                "technology",
+                # The names of the inventory.
+                "javascript",
+                "page",
+                "js",
+                "image",
+                "css",
+                "api",
+                "other",
+            ],
             "default": "",
         },
         "limit": {"type": "integer", "default": 100, "maximum": 1000},
@@ -116,14 +131,42 @@ LIST_ASSETS_SCHEMA = {
     "additionalProperties": False,
 }
 
+#: What the names the tool used before ask for now.  They have no
+#: counterpart in the inventory - the inventory holds one row per URL -
+#: so they ask for every asset.  ``javascript`` is the one name that
+#: does have a counterpart: it is the JavaScript of the inventory.
+ASSET_KIND_ALIASES = {
+    "javascript": "js",
+    "url": "",
+    "route": "",
+    "host": "",
+    "technology": "",
+}
+
 
 def list_assets(kind: str = "", limit: int = 100, *, context: ToolContext) -> dict[str, Any]:
-    """List assets discovered so far for this scan."""
-    assets = context.metadata.get("assets") or {}
-    selected = assets.get(kind, []) if kind else []
-    if not isinstance(selected, list):
-        selected = []
-    return {"kind": kind or "all", "count": len(selected), "assets": selected[:limit]}
+    """List the assets discovered so far for this scan.
+
+    The inventory holds one row per URL, with what the asset is, the
+    scope it is in, its status and the tools that saw it.  The result
+    also carries the number of assets per kind, so that an agent can see
+    the shape of the surface before it lists it.
+    """
+    requested = ASSET_KIND_ALIASES.get(kind, kind)
+    repo = context.metadata.get("asset_repository")
+    if repo is None:
+        # There is no inventory to read.  The answer is that nothing was
+        # found, not an error: a tool that cannot answer must not stop
+        # the scan.
+        return {"kind": requested or "all", "count": 0, "by_kind": {}, "assets": []}
+    scan_id = str(context.metadata.get("scan_id") or context.scan_id)
+    rows = repo.list_for_scan(scan_id, kind=requested, limit=limit)
+    return {
+        "kind": requested or "all",
+        "count": len(rows),
+        "by_kind": repo.counts_for_scan(scan_id),
+        "assets": rows,
+    }
 
 
 LIST_EVENTS_SCHEMA = {

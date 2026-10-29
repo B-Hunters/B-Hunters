@@ -1726,7 +1726,10 @@ class ScanOrchestrator:
                 # What the scanner workers produced, so that an agent can
                 # pick up what the crawlers found.
                 "worker_output_repository": self.worker_output,
-                "assets": {},
+                # The URLs the scan saw, so that an agent can list them
+                # instead of crawling the target a second time.
+                "asset_repository": self.assets,
+                "scan_id": context.scan_id,
             },
         )
 
