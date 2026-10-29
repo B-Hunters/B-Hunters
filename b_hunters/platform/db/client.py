@@ -55,6 +55,8 @@ PLATFORM_COLLECTIONS = (
     "platform_target_locks",
     "platform_issues",
     "platform_runner_heartbeats",
+    "platform_assets",
+    "platform_worker_runs",
 )
 
 
@@ -200,6 +202,16 @@ INDEXES: dict[str, list[IndexSpec]] = {
     "platform_runner_heartbeats": [
         IndexSpec([("runner_id", ASCENDING)], "uniq_runner_id", unique=True),
         IndexSpec([("last_seen_at", DESCENDING)], "by_last_seen"),
+    ],
+    "platform_assets": [
+        IndexSpec([("scan_id", ASCENDING), ("url", ASCENDING)], "uniq_scan_url", unique=True),
+        IndexSpec([("scan_id", ASCENDING), ("kind", ASCENDING)], "by_scan_kind"),
+        IndexSpec([("host", ASCENDING)], "by_host"),
+        IndexSpec([("kind", ASCENDING), ("last_seen_at", DESCENDING)], "by_kind_last_seen"),
+    ],
+    "platform_worker_runs": [
+        IndexSpec([("scan_id", ASCENDING), ("worker", ASCENDING)], "uniq_scan_worker", unique=True),
+        IndexSpec([("scan_id", ASCENDING), ("crashed_tasks", DESCENDING)], "by_scan_crashed"),
     ],
 }
 
