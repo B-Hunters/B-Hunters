@@ -280,11 +280,14 @@ export async function scanTheseUrls(output) {
   }
   const created = await api('/scans', {
     method: 'POST',
-    body: JSON.stringify({
+    // The api wrapper serialises the body itself.  Passing a string
+    // here would serialise it a second time, and the API would receive
+    // a JSON string where it expects the scan itself.
+    body: {
       name: `follow-up scan of ${host || 'the crawled URLs'}`,
       targets: { urls, authorized_hosts: host ? [host] : [] },
       test_environment: true,
-    }),
+    },
   });
   location.hash = `#/scans/${created.scan_id}`;
 }

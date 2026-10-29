@@ -11,4 +11,5 @@ import './escaping.test.js';
 import './format.test.js';
 import './main.test.js';
 import './router.test.js';
+import './scan-these-urls.test.js';
 import './views.test.js';
