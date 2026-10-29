@@ -87,8 +87,6 @@ class Services:
         self.jobs = JobRepository(self.db)
         #: One scan per target at a time.
         self.locks = TargetLockRepository(self.db)
-        #: The active orchestrator registry, keyed by scan id.
-        self.orchestrators: dict[str, Any] = {}
 
     def ensure_indexes(self) -> None:
         self.db.ensure_indexes()

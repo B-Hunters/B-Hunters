@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 import time
 from typing import Any, Optional
@@ -11,12 +10,9 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 
-from ...agents.factory import build_orchestrator, build_scan_context
 from ...agents.orchestrator import (
     REPORTING_ROLES,
     VERIFICATION_ROLES,
-    ScanContext,
-    ScanOrchestrator,
     ScanProfile,
 )
 from ...scanners import worker_output
@@ -486,7 +482,12 @@ async def start_scan(
     services: Services = Depends(get_services),
     csrf: None = Depends(enforce_csrf),
 ) -> dict[str, Any]:
-    """Start a queued scan."""
+    """Queue a scan for the runner.
+
+    The API does not run the scan: it writes a job document and returns.
+    The scan therefore survives a restart of the API, and the runner is
+    the only process that runs the agents.
+    """
     scan = services.scans.get(scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="the scan does not exist")
@@ -495,13 +496,30 @@ async def start_scan(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"the scan is '{scan.status}' and cannot be started",
         )
+    if services.jobs.find_live(scan_id) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="the scan already has a job in flight",
+        )
 
-    context = build_scan_context(scan, services.settings)
-
-    orchestrator = build_orchestrator(services)
-    services.orchestrators[scan_id] = orchestrator
-
-    asyncio.create_task(_run_scan(orchestrator, context, services))
+    job = services.jobs.enqueue(
+        kind="scan",
+        payload={
+            "scan_id": scan_id,
+            # The target key arrives with the phase checkpoints; until
+            # then it is empty and the runner runs the job without a
+            # target lock.
+            "target_key": getattr(scan, "target_key", ""),
+        },
+        max_attempts=services.settings.job_max_attempts,
+    )
+    services.scans.set_status(scan_id, "queued")
+    services.events.append(
+        scan_id=scan_id,
+        kind="scan.queued",
+        payload={"job_id": job["job_id"]},
+        actor=user.username,
+    )
     services.audit.record(
         action="scan.start",
         actor=user.username,
@@ -509,18 +527,7 @@ async def start_scan(
         target_id=scan_id,
         ip_address=request.client.host if request.client else "",
     )
-    return {"status": "starting", "scan_id": scan_id}
-
-
-async def _run_scan(orchestrator: ScanOrchestrator, context: ScanContext, services: Services) -> None:
-    try:
-        await orchestrator.run(context)
-    except asyncio.CancelledError:
-        services.scans.set_status(context.scan_id, "cancelled")
-    except Exception as exc:  # pragma: no cover - defensive
-        services.scans.set_status(context.scan_id, "failed", error=str(exc))
-    finally:
-        services.orchestrators.pop(context.scan_id, None)
+    return {"status": "queued", "scan_id": scan_id, "job_id": job["job_id"]}
 
 
 @router.post("/{scan_id}/pause")
@@ -594,19 +601,29 @@ async def stop_scan(
     services: Services = Depends(get_services),
     csrf: None = Depends(enforce_csrf),
 ) -> dict[str, Any]:
-    """Stop a scan and cancel its pending tasks."""
+    """Stop a scan and cancel its pending tasks.
+
+    A scan that is still queued has not run at all: its job is cancelled,
+    so it never starts.  A scan that is already running notices the
+    ``stopping`` status through the database and stops on its own.
+    """
     scan = services.scans.get(scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="the scan does not exist")
-    orchestrator = services.orchestrators.get(scan_id)
-    if orchestrator is not None:
-        orchestrator.cancel(scan_id)
-    else:
-        services.scans.set_status(scan_id, "cancelled")
-        for task in services.tasks.list_for_scan(scan_id):
-            if task.get("status") in {"pending", "ready", "running"}:
-                services.tasks.set_status(task["task_id"], "cancelled", error="stopped by operator")
-        services.events.append(scan_id=scan_id, kind="scan.cancelled", payload={"at": time.time()})
+
+    job = services.jobs.find_live(scan_id)
+    if job is not None:
+        services.jobs.cancel(job["job_id"])
+    services.scans.set_status(scan_id, "stopping")
+    for task in services.tasks.list_for_scan(scan_id):
+        if task.get("status") in {"pending", "ready", "running"}:
+            services.tasks.set_status(task["task_id"], "cancelled", error="stopped by operator")
+    services.events.append(
+        scan_id=scan_id,
+        kind="scan.stop_requested",
+        payload={"at": time.time(), "job_id": job["job_id"] if job else ""},
+        actor=user.username,
+    )
     services.audit.record(
         action="scan.stop",
         actor=user.username,

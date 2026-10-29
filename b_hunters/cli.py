@@ -1093,7 +1093,6 @@ def _bench(args):
                     profile=ScanProfile.from_dict({"name": kwargs.get("profile", "standard")}),
                     allow_private_network=bool(kwargs.get("allow_private_network", True)),
                 )
-                services.orchestrators[str(scan_oid)] = orchestrator
                 asyncio.create_task(orchestrator.run(context))
                 return {"scan_id": str(scan_oid), "report_id": report_oid}
 
