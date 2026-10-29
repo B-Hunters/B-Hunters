@@ -834,7 +834,13 @@ class ScanOrchestrator:
         try:
             await self._run_karton_workers(context, scope)
         finally:
-            self._merge_assets(context, self._primary_target(context))
+            try:
+                self._merge_assets(context, self._primary_target(context))
+            except Exception:  # pragma: no cover - the database may be down
+                # The merge is the last thing the worker phase does.  A
+                # failure in it must not hide the failure that brought
+                # the scan here.
+                log.exception("failed to merge the assets of the scan %s", context.scan_id)
 
     async def _run_karton_workers(self, context: ScanContext, scope: ScopeEnforcer) -> None:
         """Publish the targets to the Karton workers and collect what they found."""
