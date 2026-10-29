@@ -125,7 +125,23 @@ them. The Compose file gives them the same `b-hunters` database, and the
 | `deploy/platform.ini` | the platform, the task router | **yes** — `B-Hunters-Platform` |
 | `deploy/b-hunters.ini` | the scanner workers | **no** |
 
-The reason is in Karton itself:
+Neither file is in the repository: both carry the credentials of the
+deployment. The tracked files are the **examples** beside them,
+`deploy/platform.example.ini` and `deploy/b-hunters.example.ini`, whose
+values are placeholders. The real files are written from the
+environment:
+
+```bash
+python3 scripts/render_config.py            # writes both files, mode 0600
+python3 scripts/render_config.py --check    # reports what is missing, writes nothing
+```
+
+The renderer reads the environment file — `.env` next to the
+repositories — and replaces the `{{BHUNTERS_...}}` placeholders of the
+examples. A placeholder with no value is an error: a configuration file
+with an empty password fails at the worst possible moment.
+
+The reason the two files differ is in Karton itself:
 
 ```python
 # karton/core/base.py
