@@ -62,6 +62,59 @@ class BHunters(Karton):
             # hiding it.
             raise Exception(f"Failed to process {url}")
 
+    def auth_payload(self,task):
+        """The authentication payload of a task.
+
+        A scan can name an identity: the platform puts the identity's
+        cookies and headers into the payload of the task it publishes.
+        The payload is optional - a scan without an identity carries
+        none - and it holds secrets, so it is never written into a log
+        line and never part of an error message.
+        """
+        payload = getattr(task,"payload",None)
+        if not isinstance(payload, dict):
+            return {}
+        auth = payload.get("auth")
+        if not isinstance(auth, dict):
+            return {}
+        return auth
+
+    def auth_cookies(self,task):
+        """The cookies the task's authentication payload carries.
+
+        This is the cookie mapping on its own, for the tools that take a
+        cookie jar rather than a header.
+        """
+        cookies = self.auth_payload(task).get("cookies")
+        if not isinstance(cookies, dict):
+            return {}
+        return dict(cookies)
+
+    def auth_headers(self,task):
+        """The request headers the task's authentication payload asks for.
+
+        The cookies become a single ``Cookie`` header, the headers of
+        the payload are merged in, and the extra headers are merged
+        last, so a caller can override a header the payload already
+        carries.  A task without an authentication payload yields no
+        header at all, which leaves the tool's own invocation alone.
+
+        The values are the session of the target and they are secrets:
+        they are returned to the caller and to nobody else.
+        """
+        headers = {}
+        cookies = self.auth_cookies(task)
+        if cookies:
+            headers["Cookie"] = "; ".join(
+                f"{name}={value}" for name, value in cookies.items()
+            )
+        payload = self.auth_payload(task)
+        for key in ("headers", "extra"):
+            values = payload.get(key)
+            if isinstance(values, dict):
+                headers.update(values)
+        return headers
+
     def is_string(self,var):
         return isinstance(var, str)
 
