@@ -47,6 +47,9 @@ platform_requirements = [
     "cryptography>=42,<47",
     # The scheduler parses the cron expressions of the schedules.
     "croniter>=2,<7",
+    # The browser that prints the PDF report and drives the authenticated
+    # browser tool.
+    "playwright>=1.45,<2",
 ]
 
 setup(

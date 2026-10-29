@@ -13,6 +13,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
+    fonts-liberation libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -21,6 +23,13 @@ WORKDIR /app
 # the code does not invalidate the dependency layer.
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+
+# The browser that prints the PDF report.  It is installed as a system
+# browser rather than a per-user download, so that the platform and the
+# runner — which share the image — find the same one.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN playwright install --with-deps chromium \
+ && chmod -R a+rX /opt/ms-playwright
 
 COPY setup.py MANIFEST.in ./
 COPY b_hunters ./b_hunters

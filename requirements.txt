@@ -16,6 +16,9 @@ jsonschema>=4.20
 cryptography>=42,<47
 # The scheduler parses the cron expressions of the schedules.
 croniter>=2,<7
+# The browser that prints the PDF report and drives the authenticated
+# browser tool.
+playwright>=1.45,<2
 # The agent runtime.  The framework drives the loop: the request cycle,
 # the tool calls, the usage accounting, the retries on a rate limit and
 # the structured output.  The workers do not use it.
