@@ -107,6 +107,7 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
     admin_sub.add_parser('list-providers', help=f"{Fore.YELLOW}List the configured model providers")
     admin_sub.add_parser('check-provider', help=f"{Fore.YELLOW}Check the connectivity of a provider").add_argument('name', type=str)
     admin_sub.add_parser('migrate-issues', help=f"{Fore.YELLOW}Link existing findings to durable issues")
+    admin_sub.add_parser('migrate-secrets', help=f"{Fore.YELLOW}Encrypt the stored credentials with BHUNTERS_SECRET_KEY")
 
     bench_parser = subparsers.add_parser('bench', help=f"{Fore.CYAN}Vulnerable application benchmark laboratory")
     bench_sub = bench_parser.add_subparsers(dest='bench_command', required=True)
@@ -821,6 +822,17 @@ def _admin(args):
             return 1
 
         return asyncio.run(_check())
+
+    if args.admin_command == 'migrate-secrets':
+        from b_hunters.platform.db.repositories import migrate_provider_secrets
+
+        try:
+            migrated = migrate_provider_secrets(services)
+        except RuntimeError as exc:
+            logging.error(f"{Fore.RED}{exc}")
+            return 1
+        logging.info(f"{Fore.GREEN}Encrypted {migrated} stored credential(s).")
+        return 0
 
     if args.admin_command == 'migrate-issues':
         findings = services.db.collection("platform_findings")

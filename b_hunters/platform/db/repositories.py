@@ -8,6 +8,7 @@ aggregation.  Nothing above this layer touches pymongo directly.
 from __future__ import annotations
 
 import hashlib
+import logging
 import time
 import uuid
 from collections.abc import Sequence
@@ -19,14 +20,21 @@ from pymongo import DESCENDING
 from pymongo.errors import DuplicateKeyError
 
 from ..security.passwords import hash_password, needs_rehash
+from ..security.secrets import SecretBox, SecretKeyError
 from ..security.sessions import hash_session_id
 from .client import Database
 
 if TYPE_CHECKING:
+    # The service container imports this module, so it is only imported
+    # for the type of the migration helper below.
+    from ..api.deps import Services
+
     # The issue repository imports this module for the helpers above, so
     # it is only imported for the type: a runtime import would be a
     # cycle.
     from .issues import IssueRepository
+
+log = logging.getLogger(__name__)
 
 SEVERITIES = ("critical", "high", "medium", "low", "info")
 VERIFICATION_STATUSES = ("confirmed", "likely", "unverified", "inconclusive", "rejected")
@@ -1210,21 +1218,44 @@ class FindingRepository:
 # Providers
 # ----------------------------------------------------------------------
 class ProviderRepository:
-    def __init__(self, db: Database) -> None:
+    """The model providers and their credentials.
+
+    The credentials are encrypted with the deployment key before they are
+    written, so that a database dump does not hand out working keys.  A
+    deployment that has not configured a key yet stores them in the clear.
+    """
+
+    def __init__(self, db: Database, secret_box: SecretBox | None = None) -> None:
         self._db = db
+        #: The encryption of the stored credentials.  ``None`` when the
+        #: deployment has not configured a key yet.
+        self.secret_box = secret_box
 
     @property
     def _col(self):
         return self._db.collection("platform_providers")
 
     def upsert(self, provider: dict[str, Any]) -> dict[str, Any]:
+        """Store a provider, encrypting its key when there is a key."""
         provider.setdefault("provider_id", new_id())
         provider.setdefault("created_at", utcnow())
         provider["updated_at"] = utcnow()
         provider.setdefault("enabled", True)
         provider.setdefault("secret_ref", "")
-        self._col.update_one({"name": provider["name"]}, {"$set": provider}, upsert=True)
-        return provider
+        payload = dict(provider)
+        unset: dict[str, Any] = {}
+        if self.secret_box is not None:
+            # The plain key never reaches the database: it is encrypted
+            # into the ciphertext and the plain field is removed.
+            plain = str(payload.pop("api_key", "") or "")
+            unset["api_key"] = ""
+            if plain:
+                payload["api_key_ciphertext"] = self.secret_box.encrypt(plain)
+        update: dict[str, Any] = {"$set": payload}
+        if unset:
+            update["$unset"] = unset
+        self._col.update_one({"name": provider["name"]}, update, upsert=True)
+        return payload
 
     def get(self, name: str) -> Optional[dict[str, Any]]:
         return self._col.find_one({"name": name})
@@ -1235,13 +1266,63 @@ class ProviderRepository:
     def delete(self, name: str) -> bool:
         return self._col.delete_one({"name": name}).deleted_count > 0
 
+    def secret_for(self, name: str) -> str:
+        """The stored key of a provider, decrypted.
+
+        The key is only read when a provider is used: the rest of the
+        platform never sees it.
+        """
+        document = self.get(name)
+        if document is None:
+            return ""
+        ciphertext = str(document.get("api_key_ciphertext", "") or "")
+        if ciphertext:
+            if self.secret_box is None:
+                log.warning("the provider '%s' has an encrypted key, but no key is configured", name)
+                return ""
+            try:
+                return self.secret_box.decrypt(ciphertext)
+            except SecretKeyError:
+                log.warning("the key of the provider '%s' could not be decrypted", name)
+                return ""
+        return str(document.get("api_key", "") or "")
+
     def public(self, provider: dict[str, Any]) -> dict[str, Any]:
-        out = dict(provider)
-        for key in ("api_key", "secret", "token"):
+        # The ``_id`` is stripped: a BSON ``ObjectId`` cannot be
+        # serialised into JSON, and this view is returned by the API.
+        out = {key: value for key, value in provider.items() if key != "_id"}
+        for key in ("api_key", "api_key_ciphertext", "secret", "token"):
             if key in out:
                 out[key] = "***" if out[key] else ""
         out["secret_ref"] = out.get("secret_ref", "")
         return out
+
+
+def migrate_provider_secrets(services: Services) -> int:
+    """Encrypt the provider keys that are still stored in the clear.
+
+    Returns the number of providers that were migrated.  A deployment
+    without a secret key has nothing to encrypt with, so the migration
+    refuses instead of writing the keys back unchanged.
+    """
+    box = getattr(services, "secret_box", None)
+    if box is None:
+        raise RuntimeError("no secret key is configured; set BHUNTERS_SECRET_KEY")
+    collection = services.db.collection("platform_providers")
+    migrated = 0
+    for document in collection.find({"api_key": {"$exists": True, "$ne": ""}}):
+        plain = str(document.get("api_key", "") or "")
+        if not plain:
+            continue
+        collection.update_one(
+            {"name": document.get("name")},
+            {
+                "$set": {"api_key_ciphertext": box.encrypt(plain), "updated_at": utcnow()},
+                "$unset": {"api_key": ""},
+            },
+        )
+        migrated += 1
+    return migrated
 
 
 # ----------------------------------------------------------------------

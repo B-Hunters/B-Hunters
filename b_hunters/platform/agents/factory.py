@@ -76,7 +76,9 @@ def provider_config_for(services: Services, provider_name: str = "") -> Provider
             return ProviderConfig(
                 name=document.get("name", provider_name),
                 base_url=document.get("base_url", ""),
-                api_key=document.get("api_key", "") or "",
+                # The key is stored encrypted: it is decrypted here, at
+                # the moment the provider is used.
+                api_key=services.providers.secret_for(provider_name),
                 model=document.get("model", ""),
                 role_models=document.get("role_models", {}) or {},
                 temperature=float(document.get("temperature", 0.0)),

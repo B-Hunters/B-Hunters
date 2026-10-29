@@ -79,9 +79,10 @@ class Services:
         self.issues = IssueRepository(self.db)
         self.findings = FindingRepository(self.db, issues=self.issues)
         #: The encryption of the stored credentials.  ``None`` when the
-        #: deployment has not configured a key yet.
+        #: deployment has not configured a key yet.  It is built before
+        #: the providers, because the providers encrypt with it.
         self.secret_box = SecretBox.from_settings(self.settings)
-        self.providers = ProviderRepository(self.db)
+        self.providers = ProviderRepository(self.db, secret_box=self.secret_box)
         self.agent_definitions = AgentDefinitionRepository(self.db)
         self.services = ServiceRepository(self.db)
         #: What the scanner workers produced, saved per scan.
