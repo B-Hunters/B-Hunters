@@ -5,6 +5,8 @@ import { el, renderAgents, renderFindings, renderOutput, setTitle, toast } from 
 import { badge, escape, fmtTime } from '../format.js';
 import { navigate } from '../router.js';
 import { startStream } from '../stream.js';
+import { renderAssetsTab } from './assets.js';
+import { openTranscript, renderParticipation, renderRoleTable } from './participation.js';
 
 /** The scan detail route. */
 export async function scanDetailView(params) {
@@ -46,6 +48,9 @@ export async function scanDetailView(params) {
       <div class="tab" data-tab="tools">Tool calls</div>
       <div class="tab" data-tab="scanners">Scanners</div>
       <div class="tab" data-tab="services">Services</div>
+      <div class="tab" data-tab="urls">URLs</div>
+      <div class="tab" data-tab="js">JS</div>
+      <div class="tab" data-tab="images">Images</div>
       <div class="tab" data-tab="findings">Findings</div>
     </div>
     <div id="scan-tab-body"></div>`;
@@ -94,7 +99,22 @@ export async function renderScanTab(tab, scanId) {
   if (tab === 'agents') {
     const data = await api(`/scans/${scanId}/agents`);
     const calls = await api(`/scans/${scanId}/tool-calls?limit=2000`);
-    body.innerHTML = `<div class="card"><div class="card-body tight"><div class="table-scroll">${renderAgents(data.agents || [], calls.tool_calls || [])}</div></div></div>`;
+    let roles = [];
+    try {
+      const report = await api(`/scans/${scanId}/agents/report`);
+      roles = report.roles || [];
+    } catch {
+      // The per-role report is not available on every deployment; the
+      // live agent state below is still worth showing.
+    }
+    body.innerHTML = `<div class="card"><div class="card-body tight"><div class="table-scroll">${renderAgents(data.agents || [], calls.tool_calls || [])}</div></div></div>
+      <div class="card"><div class="card-body tight">${renderRoleTable(roles)}</div></div>
+      <div class="card" id="transcript-card"><div class="card-body"><div class="desc">Pick a role to read its transcript.</div></div></div>`;
+    body.querySelectorAll('[data-transcript]').forEach((button) => {
+      button.addEventListener('click', () => {
+        openTranscript(scanId, button.dataset.transcript, el('transcript-card'));
+      });
+    });
     return;
   }
   if (tab === 'messages') {
@@ -110,9 +130,21 @@ export async function renderScanTab(tab, scanId) {
   if (tab === 'scanners') {
     const data = await api(`/scans/${scanId}/scanners`);
     const output = await api(`/scans/${scanId}/worker-output?limit=300`);
-    body.innerHTML = renderScanners(data, output);
+    let participation = null;
+    try {
+      participation = await api(`/scans/${scanId}/participation`);
+    } catch {
+      // The participation table needs the facts of the worker phase; a
+      // scan that has not dispatched anything has none yet.
+    }
+    body.innerHTML = (participation ? `<div class="card"><div class="card-body tight">${renderParticipation(participation)}</div></div>` : '')
+      + renderScanners(data, output);
     const action = el('scan-these');
     if (action) action.addEventListener('click', () => scanTheseUrls(output));
+    return;
+  }
+  if (tab === 'urls' || tab === 'js' || tab === 'images') {
+    await renderAssetsTab(tab, scanId);
     return;
   }
   if (tab === 'services') {

@@ -13,3 +13,4 @@ import './main.test.js';
 import './router.test.js';
 import './scan-these-urls.test.js';
 import './views.test.js';
+import './assets-view.test.js';
