@@ -116,6 +116,68 @@ services:
       retries: 3
       start_period: 20s
 
+  # --- the runner ------------------------------------------------------
+  # The runner executes the scans.  It is a separate process from the
+  # API on purpose: a scan used to be an asyncio task inside the API,
+  # so restarting the API killed the scan with it.  The runner claims a
+  # job from the MongoDB queue, holds a lease on it, heartbeats that
+  # lease while it works, and picks the scan up again where it left off
+  # when it is restarted.
+  runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: b-hunters-platform:1.2.0
+    container_name: bhunter_runner
+    restart: unless-stopped
+    depends_on:
+      - mongo
+      - redis
+      - s3
+    environment:
+      - BHUNTERS_MONGO_URI=mongodb://bhunter:bhunter_dev_pw@mongo:27017/?authSource=admin
+      - BHUNTERS_MONGO_DB=b-hunters
+      - BHUNTERS_KARTON_CONFIG_PATH=/etc/b-hunters/b-hunters.ini
+      - BHUNTERS_AGENT_WORKSPACE_ROOT=/var/lib/b-hunters/workspaces
+      - BHUNTERS_SESSION_COOKIE_SECURE=false
+      # The key that encrypts the stored credentials.  It has to be the
+      # same key in the platform and in the runner: the API never
+      # decrypts, the runner does.
+      - BHUNTERS_SECRET_KEY=${BHUNTERS_SECRET_KEY:?set BHUNTERS_SECRET_KEY in the environment file}
+      - BHUNTERS_RUNNER_CONCURRENCY=${BHUNTERS_RUNNER_CONCURRENCY:-1}
+      - BHUNTERS_RUNNER_LEASE_SECONDS=${BHUNTERS_RUNNER_LEASE_SECONDS:-60}
+      - BHUNTERS_RUNNER_HEARTBEAT_SECONDS=${BHUNTERS_RUNNER_HEARTBEAT_SECONDS:-10}
+      - BHUNTERS_JOB_MAX_ATTEMPTS=${BHUNTERS_JOB_MAX_ATTEMPTS:-3}
+      # The model provider.  The runner is the process that talks to it.
+      - BHUNTERS_LLM_NAME=${MINIMAX_NAME:-minimax}
+      - BHUNTERS_LLM_BASE_URL=${MINIMAX_HOST}
+      - BHUNTERS_LLM_API_KEY=${MINIMAX_KEY}
+      - BHUNTERS_LLM_MODEL=${MINIMAX_MODEL:-MINIMAX-M3.1-flash}
+      - BHUNTERS_LLM_MAX_OUTPUT_TOKENS=8192
+      - BHUNTERS_LLM_TIMEOUT=300
+      - BHUNTERS_AGENT_VERIFICATION_ENABLED=${BHUNTERS_AGENT_VERIFICATION_ENABLED:-false}
+      - BHUNTERS_AGENT_MAX_TOKENS_PER_TASK=1500000
+      - BHUNTERS_AGENT_MAX_TOKENS_PER_SCAN=12000000
+      - BHUNTERS_AGENT_MAX_TOOL_CALLS_PER_TASK=100
+      - BHUNTERS_AGENT_MAX_ROUNDS=24
+      - BHUNTERS_AGENT_WALL_CLOCK_SECONDS=1800
+    command: ["b-hunters", "runner"]
+    volumes:
+      - ./deploy/platform.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The agent workspaces are shared with the platform: the API
+      # renders the report from the artefacts the runner produced.
+      - workspaces:/var/lib/b-hunters
+    healthcheck:
+      # The runner has no HTTP port.  It reports itself in the database,
+      # and this asks it whether its heartbeat is fresh.
+      test: ["CMD-SHELL", "b-hunters runner status || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+    networks:
+      - bhunter
+
   # --- the data stores -------------------------------------------------
   mongo:
     image: mongo:7.0.16
@@ -524,6 +586,20 @@ services:
     restart: "no"
     ports:
       - "127.0.0.1:8081:8080"
+    # The image's own healthcheck calls curl, which the image does not
+    # have: the container was reported unhealthy for months while the
+    # application served normally.  The image has bash, and bash can
+    # open a TCP connection, so the healthcheck is a TCP request.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 &&
+          printf "GET /WebGoat/ HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q HTTP'
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     networks:
       bhunter:
         ipv4_address: 172.25.0.14
