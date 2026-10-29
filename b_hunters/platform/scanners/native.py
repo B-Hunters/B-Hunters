@@ -8,7 +8,8 @@ implement at all:
 * credential detection with redaction,
 * OpenAPI specification discovery and checking,
 * GraphQL introspection and review,
-* dependency analysis against the OSV database.
+* dependency analysis against the OSV database,
+* asset collection: every URL the target serves.
 
 Every adapter that touches the network does so through the scan's
 :class:`~b_hunters.platform.security.scope.ScopeEnforcer`, so the same
@@ -26,9 +27,12 @@ import shutil
 import socket
 import ssl
 import subprocess
+from collections import deque
+from dataclasses import dataclass
 from typing import Any, Optional
 from urllib.parse import urljoin, urlsplit
 
+from ..assets import classify, is_external, normalise_url
 from ..security.redact import redact_text
 from ..security.scope import ScopeEnforcer
 from .base import ScanRequest, ScanResult
@@ -41,6 +45,18 @@ from .graphql_adapter import (  # noqa: F401
 )
 
 log = logging.getLogger(__name__)
+
+# ----------------------------------------------------------------------
+# Asset collection limits
+# ----------------------------------------------------------------------
+#: The most assets one scan records.
+ASSET_LIMIT = 2000
+#: How far from a seed the crawler walks.
+MAX_ASSET_DEPTH = 3
+#: How many bytes of one response are read.  The inventory holds
+#: metadata only, so a body is read to find its references and no
+#: further.
+MAX_ASSET_BYTES = 256 * 1024
 
 # ----------------------------------------------------------------------
 # Security headers
@@ -376,19 +392,107 @@ async def secret_scan_executor(request: ScanRequest) -> ScanResult:
 
 
 async def _fetch_text(url: str, request: ScanRequest) -> str:
+    """Fetch *url* and return its body, or nothing when it cannot be read."""
+    document = await _fetch_document(url, request, limit=4 * 1024 * 1024)
+    if not document.allowed or document.error:
+        return ""
+    return document.text
+
+
+@dataclass
+class FetchedDocument:
+    """What one scope-checked request returned.
+
+    The body is read to look at it, never to store it.
+    """
+
+    #: Whether the scope allowed the request.
+    allowed: bool = False
+    #: Why the scope refused it.
+    reason: str = ""
+    #: The failure of the request itself.
+    error: str = ""
+    status_code: int = 0
+    content_type: str = ""
+    #: The number of bytes read, which is capped at the read limit.
+    size_bytes: int = 0
+    #: The body, which the caller must not store.
+    text: str = ""
+
+
+async def _fetch_document(url: str, request: ScanRequest, *, limit: int = MAX_ASSET_BYTES) -> FetchedDocument:
+    """Perform one scope-checked ``GET`` and return its metadata and body.
+
+    Every request this module makes goes through this helper, so the
+    scope policy, the rate limit and the concurrency budget are
+    enforced in one place.  Only ``GET`` is ever issued, and at most
+    *limit* bytes of the body are read.
+    """
     import httpx
 
     scope: Optional[ScopeEnforcer] = request.scope
+    reserved = False
+    if scope is not None:
+        decision = scope.evaluate_url(url)
+        if not decision.allowed:
+            return FetchedDocument(allowed=False, reason=decision.reason)
+        if not await _reserve_slot(scope, decision.host):
+            return FetchedDocument(allowed=False, reason="the scan budget is exhausted")
+        reserved = True
+
+    timeout = 20.0
     try:
-        if scope is not None:
-            decision = scope.evaluate_url(url)
-            if not decision.allowed:
-                return ""
-        async with httpx.AsyncClient(follow_redirects=True, timeout=20.0, verify=False) as client:
-            response = await client.get(url)
-            return response.text[: 4 * 1024 * 1024]
-    except Exception:
-        return ""
+        timeout = float(request.options.get("timeout", 20.0) or 20.0)
+    except (TypeError, ValueError):
+        timeout = 20.0
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout, verify=False) as client:
+            async with client.stream("GET", url) as response:
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) >= limit:
+                        break
+                status_code = response.status_code
+                content_type = response.headers.get("content-type", "").strip()
+                encoding = response.encoding or "utf-8"
+    except Exception as exc:
+        return FetchedDocument(allowed=True, error=f"{type(exc).__name__}: {exc}")
+    finally:
+        if reserved and scope is not None:
+            _release_slot(scope)
+
+    read = bytes(body[:limit])
+    return FetchedDocument(
+        allowed=True,
+        status_code=status_code,
+        content_type=content_type,
+        size_bytes=len(read),
+        text=read.decode(encoding, errors="replace"),
+    )
+
+
+async def _reserve_slot(scope: Any, host: str) -> bool:
+    """Apply the enforcer's rate limit and its concurrency budget.
+
+    The enforcer is the only place that knows the scan's limits.  A
+    scope that does not implement them - a test double - is not
+    throttled.
+    """
+    throttle = getattr(scope, "throttle", None)
+    if callable(throttle):
+        await asyncio.to_thread(throttle, host)
+    acquire = getattr(scope, "acquire_slot", None)
+    if callable(acquire):
+        return bool(await asyncio.to_thread(acquire, 30.0))
+    return True
+
+
+def _release_slot(scope: Any) -> None:
+    """Give the concurrency slot back to the enforcer."""
+    release = getattr(scope, "release_slot", None)
+    if callable(release):
+        release()
 
 
 # ----------------------------------------------------------------------
@@ -513,6 +617,206 @@ async def dependency_analysis_executor(request: ScanRequest) -> ScanResult:
         items=items,
         metadata={"manifests": manifests},
     )
+
+
+# ----------------------------------------------------------------------
+# Asset collection
+# ----------------------------------------------------------------------
+#: The attributes that carry a reference to another URL.
+REFERENCE_ATTRIBUTE_RE = re.compile(r"""(?i)\b(?:href|src)\s*=\s*["']([^"']+)["']""")
+#: The target of a ``fetch()`` call.
+FETCH_TARGET_RE = re.compile(r"""(?i)\bfetch\s*\(\s*["']([^"']+)["']""")
+#: The target of an ``XMLHttpRequest.open()`` call.
+XHR_TARGET_RE = re.compile(
+    r"""(?i)\.open\s*\(\s*["'](?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s*["']\s*,\s*["']([^"']+)["']"""
+)
+#: The schemes that are not a URL to fetch.
+NON_HTTP_SCHEMES = ("javascript:", "mailto:", "tel:", "data:", "about:", "blob:")
+
+
+async def asset_crawl_executor(request: ScanRequest) -> ScanResult:
+    """Crawl the target and record every URL it serves.
+
+    The crawler walks the target the way a browser does: it follows the
+    links the pages carry, it records the references the scripts make,
+    and it never leaves the origin it started from.  A reference to
+    another host is recorded as an external reference and is never
+    fetched.
+
+    Only metadata is recorded.  A body is read to find the references
+    and is never stored.
+    """
+    assets: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
+    authorized = _authorized_hosts(request)
+    seen: set[str] = set()
+    queue: deque[tuple[str, str, int, str]] = deque()
+
+    for raw in _crawl_seeds(request, authorized):
+        url = normalise_url(raw)
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        queue.append((raw, url, 0, ""))
+
+    fetched = 0
+    while queue:
+        if len(assets) >= ASSET_LIMIT:
+            break
+        raw, url, depth, discovered_from = queue.popleft()
+        item = assets.setdefault(url, _asset_item(url, depth=depth, discovered_from=discovered_from))
+
+        if is_external(url, authorized):
+            # The target itself is not covered by the authorised scope.
+            # It is recorded, but the scope decides whether it is fetched.
+            item["scope"] = "external"
+
+        document = await _fetch_document(raw, request)
+        if not document.allowed:
+            # The scope refused it.  The reference stays in the inventory
+            # without a status, and nothing was fetched.
+            continue
+        if document.error:
+            errors.append(f"{url}: {document.error}")
+            continue
+
+        fetched += 1
+        item["status_code"] = document.status_code
+        item["content_type"] = document.content_type
+        item["size_bytes"] = document.size_bytes
+        item["kind"] = classify(content_type=document.content_type, url=url)
+        item["preview"] = f"{document.status_code} {url}"
+
+        for reference in _extract_references(document.text):
+            if len(assets) >= ASSET_LIMIT:
+                break
+            child = _resolve(raw, reference)
+            if not child:
+                continue
+            child_url = normalise_url(child)
+            if not child_url or child_url in seen:
+                continue
+            seen.add(child_url)
+            child_item = _asset_item(child_url, depth=depth + 1, discovered_from=url)
+            assets[child_url] = child_item
+            if _is_cross_origin(child, raw) or is_external(child_url, authorized):
+                # A third-party reference is recorded, never fetched.
+                child_item["scope"] = "external"
+                continue
+            if depth + 1 <= MAX_ASSET_DEPTH:
+                queue.append((child, child_url, depth + 1, url))
+
+    return ScanResult(
+        scanner="asset_crawl",
+        ok=not errors,
+        error="; ".join(errors[:5]),
+        kind="url",
+        items=list(assets.values()),
+        metadata={
+            "assets": len(assets),
+            "fetched": fetched,
+            "external": sum(1 for item in assets.values() if item["scope"] == "external"),
+            "targets_checked": len(request.targets),
+            "max_depth": MAX_ASSET_DEPTH,
+        },
+    )
+
+
+def _asset_item(url: str, *, depth: int, discovered_from: str) -> dict[str, Any]:
+    """One row of the asset inventory, before the URL has been fetched."""
+    return {
+        "value": url,
+        "kind": classify(url=url),
+        "scope": "first_party",
+        "status_code": 0,
+        "content_type": "",
+        "size_bytes": 0,
+        "depth": depth,
+        "discovered_from": discovered_from,
+        "preview": url,
+    }
+
+
+def _extract_references(text: str) -> list[str]:
+    """Return the URLs a body refers to."""
+    found: list[str] = []
+    for pattern in (REFERENCE_ATTRIBUTE_RE, FETCH_TARGET_RE, XHR_TARGET_RE):
+        for match in pattern.finditer(text):
+            found.append(match.group(1))
+    return found
+
+
+def _resolve(base: str, reference: str) -> str:
+    """Resolve *reference* against the page it was found on."""
+    text = (reference or "").strip()
+    if not text or text.startswith("#"):
+        return ""
+    if text.lower().startswith(NON_HTTP_SCHEMES):
+        return ""
+    try:
+        return urljoin(base, text)
+    except ValueError:
+        return ""
+
+
+def _is_cross_origin(url: str, base: str) -> bool:
+    """Return ``True`` when *url* is on another origin than *base*."""
+    try:
+        first = urlsplit(url)
+        second = urlsplit(base)
+        return (first.scheme.lower(), first.hostname or "", first.port) != (
+            second.scheme.lower(),
+            second.hostname or "",
+            second.port,
+        )
+    except ValueError:
+        return True
+
+
+def _authorized_hosts(request: ScanRequest) -> list[str]:
+    """The hosts the crawler treats as first-party.
+
+    The scope policy names them.  A scope that names none - a test
+    double - leaves the scan's own targets as the authorised surface.
+    """
+    policy = getattr(request.scope, "policy", None)
+    hosts = [
+        str(host).strip().lower()
+        for host in (getattr(policy, "authorized_hosts", ()) or ())
+        if str(host).strip()
+    ]
+    if hosts:
+        return hosts
+
+    hosts = []
+    for target in request.targets:
+        url = target if "://" in target else f"https://{target}"
+        host = (urlsplit(url).hostname or "").lower()
+        if host and host not in hosts:
+            hosts.append(host)
+    return hosts
+
+
+def _crawl_seeds(request: ScanRequest, authorized: list[str]) -> list[str]:
+    """The URLs the crawl starts from.
+
+    The scan targets are the seeds.  A URL among the operator's own
+    seeds joins them when it is in scope.
+    """
+    seeds: list[str] = []
+    for target in request.targets:
+        text = (target or "").strip()
+        if not text:
+            continue
+        seeds.append(text if "://" in text else f"https://{text}")
+    for seed in request.seeds:
+        text = (seed or "").strip()
+        if not text.startswith(("http://", "https://")):
+            continue
+        if is_external(normalise_url(text), authorized):
+            continue
+        seeds.append(text)
+    return seeds
 
 
 def _read_text_file(path: str, limit: int = 4 * 1024 * 1024) -> str | None:

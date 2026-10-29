@@ -329,6 +329,15 @@ def default_all_adapters() -> list[AdapterSpec]:
             ["finding"],
             upstream="https://github.com/google/osv-scanner",
         ),
+        _native_spec(
+            "asset_crawl",
+            "1.0.0",
+            "Crawls the target and records every URL it serves, with its kind, scope, "
+            "status, content type and size. Metadata only: no body is ever stored.",
+            [Capability.HTTP_CRAWL],
+            ["url"],
+            upstream="in-process",
+        ),
     ]
     return specs
 
