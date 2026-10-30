@@ -248,6 +248,12 @@ class AgentRun:
     error: str = ""
     next_step: str = ""
     disposition: Disposition = Disposition.COMPLETE
+    #: What the role observed while it worked.  The runtime sets them
+    #: when the role concludes, and they belong to the run: without them
+    #: in the record the observations of a role are lost.
+    observations: list[str] = field(default_factory=list)
+    #: What the role was not sure about.
+    uncertainty: str = ""
 
     @property
     def stop_reason(self) -> str:
@@ -277,6 +283,8 @@ class AgentRun:
             "error": self.error,
             "next_step": self.next_step,
             "disposition": self.disposition.value,
+            "observations": list(self.observations),
+            "uncertainty": self.uncertainty,
         }
 
 

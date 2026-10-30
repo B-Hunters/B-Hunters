@@ -43,7 +43,7 @@ jobs:
       - name: Install the package
         run: pip install -e ".[platform]"
       - name: MyPy
-        run: mypy b_hunters/platform --ignore-missing-imports --no-strict-optional
+        run: mypy b_hunters/platform b_hunters/bhunter.py --ignore-missing-imports --no-strict-optional
 
   unit-tests:
     name: Unit and security tests
