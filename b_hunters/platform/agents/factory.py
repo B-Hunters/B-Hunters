@@ -133,5 +133,8 @@ def build_scan_context(scan: ScanRecord, settings: Settings) -> ScanContext:
             # The identity the scan logs in with.  The session travels
             # with the task the workers receive; it is never stored.
             "identity_id": str((definition.get("identity_ids") or [""])[0] or ""),
+            # The second identity is what an access-control comparison
+            # uses: the same request, made as somebody else.
+            "secondary_identity_id": str((definition.get("identity_ids") or ["", ""])[1] or ""),
         },
     )

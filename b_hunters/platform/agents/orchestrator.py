@@ -1273,6 +1273,29 @@ class ScanOrchestrator:
             log.warning("could not read the session of the identity %s", identity_id)
             return {}
 
+    def _secondary_auth_payload(self, context: ScanContext) -> dict[str, Any]:
+        """The session of the scan's second identity.
+
+        An access-control flaw is invisible to one session: the request
+        that is refused to you is the one that is allowed to somebody
+        else.  The second identity is what makes the difference
+        visible.
+        """
+        identity_id = str((context.options or {}).get("secondary_identity_id", "") or "")
+        if not identity_id:
+            return {}
+        try:
+            from ..db.identities import IdentityRepository
+
+            repository = IdentityRepository(self.db, secret_box=self._secret_box)
+            payload = repository.auth_payload(identity_id)
+            if payload:
+                repository.touch(identity_id)
+            return payload
+        except Exception:
+            log.warning("could not read the session of the second identity")
+            return {}
+
     def _merge_assets(self, context: ScanContext, primary_target: str) -> dict[str, int]:
         """Fold what was found into the asset inventory.
 
@@ -2355,6 +2378,9 @@ class ScanOrchestrator:
                 # blind finding instead of guessing at it.
                 "callbacks_repository": self.callbacks,
                 "callback_base_url": self.settings.callback_base_url,
+                # The two sessions an access-control comparison uses.
+                "primary_auth": self._auth_payload(context),
+                "secondary_auth": self._secondary_auth_payload(context),
                 # The browser the roles drive.  It is opened once for
                 # the scan and closed when the scan ends.
                 "browser": self._browser,

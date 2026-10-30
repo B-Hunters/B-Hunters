@@ -501,7 +501,10 @@ BUILTIN_ROLES: list[AgentRole] = [
             "response for an operation a user is permitted to perform with the response for "
             "the same operation performed with lower privileges - both by changing the "
             "session, and by manipulating the object identifier where the protocol allows "
-            "it. Report a missing authorisation check only when the evidence supports it: a "
+            "it. When the scan names two identities, use compare_access to make the same "
+            "request as each of them: the difference between the two answers is the "
+            "evidence, and it is stronger than anything you can infer from one session. "
+            "Report a missing authorisation check only when the evidence supports it: a "
             "lower-privileged request that succeeds and returns the protected resource is a "
             "finding; a different error page is not proof of a flaw but is worth noting as "
             "an inconclusive observation."
@@ -509,6 +512,7 @@ BUILTIN_ROLES: list[AgentRole] = [
         tools=[
             "http_request",
             "compare_responses",
+            "compare_access",
             "list_findings",
             "list_assets",
             "read_file",
@@ -519,6 +523,7 @@ BUILTIN_ROLES: list[AgentRole] = [
             [
                 "http_request",
                 "compare_responses",
+                "compare_access",
                 "list_findings",
                 "list_assets",
                 "read_file",

@@ -11,6 +11,7 @@ from ..gateway import (
     CAPABILITY_WRITE,
     ToolRegistry,
 )
+from .access import COMPARE_ACCESS_SCHEMA, compare_access
 from .callbacks import (
     CREATE_CALLBACK_SCHEMA,
     LIST_CALLBACKS_SCHEMA,
@@ -177,6 +178,17 @@ def build_tool_registry() -> ToolRegistry:
         list_callbacks,
         capabilities={CAPABILITY_READ},
         timeout=30.0,
+    )
+    registry.register(
+        "compare_access",
+        "Ask for one url as the primary identity and as the second identity, and "
+        "describe the difference. A difference is the evidence of an object-level "
+        "authorisation flaw: the request one session is refused is the request another "
+        "session is allowed.",
+        COMPARE_ACCESS_SCHEMA,
+        compare_access,
+        capabilities={CAPABILITY_NETWORK},
+        timeout=60.0,
     )
     registry.register(
         "browser",
