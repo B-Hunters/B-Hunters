@@ -557,6 +557,13 @@ class AgentRuntime:
         if run.status == "succeeded" and not run.conclusion:
             run.status = "failed"
             run.error = run.error or "the agent produced no conclusion"
+        if run.status != "succeeded" and not run.findings:
+            # A role that was cut off keeps what it worked out.  The
+            # findings of a role live in its final answer, so a role
+            # that ran out of time would lose everything it had found.
+            # What it last said is read as its answer: the findings it
+            # names are kept, and they are judged like any other.
+            _salvage(run, last_text)
         return run
 
     # ------------------------------------------------------------------
@@ -729,6 +736,33 @@ def _parse_json_object(text: str) -> dict[str, Any] | None:
         if isinstance(parsed, dict):
             return parsed
     return None
+
+
+def _salvage(run: Any, last_text: str) -> None:
+    """Keep what a role that was cut off had worked out.
+
+    The findings of a role travel in its final answer, and a role that
+    ran out of time never gives one.  The last thing it said is read
+    as its answer, so that the findings it names are kept and judged
+    like any other.  The run keeps its status: it was cut off, and it
+    says so.
+    """
+    text = (last_text or "").strip()
+    if not text:
+        return
+    if run.findings:
+        # The role recorded something already; that is what it found.
+        return
+    conclusion = normalise_conclusion(conclusion_from_text(text))
+    if not conclusion["findings"]:
+        return
+    run.findings = list(conclusion["findings"])
+    if not run.conclusion:
+        run.conclusion = conclusion["conclusion"] or text[:4000]
+    if not run.observations:
+        run.observations = list(conclusion["observations"])
+    if not run.uncertainty:
+        run.uncertainty = str(conclusion["uncertainty"] or "")
 
 
 def parse_findings(payload: Any, *, role: str, task_id: str) -> list[CandidateFinding]:
