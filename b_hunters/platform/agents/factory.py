@@ -126,5 +126,10 @@ def build_scan_context(scan: ScanRecord, settings: Settings) -> ScanContext:
         max_requests_per_second=float(scope.get("max_requests_per_second", 10.0)),
         request_timeout=float(scope.get("request_timeout", 20.0)),
         workspace_root=settings.agent_workspace_root,
-        options={"provider": definition.get("provider", "")},
+        options={
+            "provider": definition.get("provider", ""),
+            # The identity the scan logs in with.  The session travels
+            # with the task the workers receive; it is never stored.
+            "identity_id": str((definition.get("identity_ids") or [""])[0] or ""),
+        },
     )

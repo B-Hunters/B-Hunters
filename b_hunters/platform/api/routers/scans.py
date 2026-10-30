@@ -52,6 +52,9 @@ class ScanRequestModel(BaseModel):
     artifacts: list[str] = Field(default_factory=list)
     schema_artifacts: list[str] = Field(default_factory=list)
     test_accounts: list[dict[str, Any]] = Field(default_factory=list)
+    #: The identities the scan logs in with.  The first is the primary
+    #: one; the second is what an access-control comparison uses.
+    identity_ids: list[str] = Field(default_factory=list)
     max_concurrency: int = Field(default=4, ge=1, le=32)
     max_requests_per_second: float = Field(default=10.0, ge=0.1, le=500)
     request_timeout: float = Field(default=20.0, ge=1, le=300)
@@ -395,6 +398,7 @@ async def create_scan(
         "artifacts": payload.artifacts,
         "schema_artifacts": payload.schema_artifacts,
         "test_accounts": [{"username": account.get("username", "")} for account in payload.test_accounts],
+        "identity_ids": list(payload.identity_ids),
         "profile": profile.to_dict() if hasattr(profile, "to_dict") else {},
         "provider": payload.provider,
         "test_environment": payload.test_environment,

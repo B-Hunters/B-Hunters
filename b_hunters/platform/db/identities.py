@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from typing import Any, Optional
 
 log = logging.getLogger(__name__)
@@ -72,7 +73,9 @@ class IdentityRepository:
             raise ValueError(f"'{kind}' is not a kind of identity")
         now = time.time()
         document: dict[str, Any] = {
-            "identity_id": f"id-{int(now * 1000)}-{abs(hash(name)) % 100000}",
+            # A unique identifier: two identities with the same name
+            # created in the same millisecond must not collide.
+            "identity_id": f"id-{uuid.uuid4().hex[:16]}",
             "name": name,
             "kind": kind,
             "login_url": login_url,

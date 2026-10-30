@@ -344,6 +344,11 @@ class KartonWorkerBridge:
         task.add_payload("scan_id", target.legacy_scan_id, persistent=True)
         task.add_payload("data", target.domain)
         task.add_payload("source", "producer")
+        if target.auth:
+            # The session of the identity the scan names.  The workers
+            # read it from the task and pass it to their tools; it is
+            # never written into the report.
+            task.add_payload("auth", target.auth)
         self.producer.send_task(task)
         root_uid = str(task.root_uid)
         if target.platform_scan_id:
