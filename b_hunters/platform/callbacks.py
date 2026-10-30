@@ -33,9 +33,7 @@ def create_callback_app(repository: CallbackRepository) -> FastAPI:
     """Build the callback service around a repository."""
     app = FastAPI(title="B-Hunters callbacks", docs_url=None, redoc_url=None)
 
-    @app.get("/cb/{token}")
-    @app.post("/cb/{token}")
-    async def receive(token: str, request: Request) -> Any:
+    async def _receive(token: str, request: Request) -> Any:
         """Record a callback and answer it.
 
         The path that is not a live token is not answered at all: the
@@ -63,6 +61,22 @@ def create_callback_app(repository: CallbackRepository) -> FastAPI:
         if record is None:
             return PlainTextResponse("not found", status_code=404)
         return PlainTextResponse(CALLBACK_BODY)
+
+    @app.get("/cb/{token}")
+    @app.post("/cb/{token}")
+    async def receive(token: str, request: Request) -> Any:
+        """Record a callback that came to the token's own path."""
+        return await _receive(token, request)
+
+    @app.get("/cb/{token}/{path:path}")
+    @app.post("/cb/{token}/{path:path}")
+    async def receive_with_path(token: str, path: str, request: Request) -> Any:
+        """Record a callback that carried something in the path.
+
+        A callback often carries data in the path — an identifier, a
+        marker — so the path after the token is part of the record.
+        """
+        return await _receive(token, request)
 
     @app.get("/readyz", include_in_schema=False)
     async def readyz() -> Any:

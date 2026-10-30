@@ -154,6 +154,18 @@ def test_the_service_answers_on_the_callback_path_only(callback_client, services
     assert "B-Hunters" in response.text
 
 
+def test_the_service_answers_on_a_path_below_the_token(callback_client, services):
+    """A callback often carries data in the path."""
+    token = services.callbacks.create_token(label="the ssrf test", scan_id="s1")
+
+    response = callback_client.get(f"/cb/{token['token']}/marker/42")
+
+    assert response.status_code == 200, response.text
+    hits = services.callbacks.list_for_scan("s1")
+    assert len(hits) == 1
+    assert hits[0]["path"].endswith("/marker/42")
+
+
 def test_the_service_refuses_any_other_path(callback_client):
     assert callback_client.get("/cb/not-a-token").status_code == 404
     assert callback_client.get("/").status_code == 404

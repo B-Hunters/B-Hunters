@@ -1158,7 +1158,7 @@ def _callbacks(args) -> int:
 
     settings = load_settings()
     host = args.host or settings.host
-    port = args.port or 8081
+    port = args.port or 8091
     logging.info(f"{Fore.GREEN}Starting the B-Hunters callback service on http://{host}:{port}")
     uvicorn.run(build_app(settings), host=host, port=port, log_level=settings.log_level.lower())
     return 0
