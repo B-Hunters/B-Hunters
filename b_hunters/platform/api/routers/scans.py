@@ -55,6 +55,13 @@ class ScanRequestModel(BaseModel):
     #: The identities the scan logs in with.  The first is the primary
     #: one; the second is what an access-control comparison uses.
     identity_ids: list[str] = Field(default_factory=list)
+    #: What to do when the session cannot be established.
+    #:
+    #: ``fail`` stops the scan: an authenticated scan that runs without
+    #: a session reports what an unauthenticated scan finds, which is
+    #: not what the operator asked for.  ``continue_unauthenticated``
+    #: runs it anyway and says so.
+    on_login_failure: str = Field(default="fail")
     max_concurrency: int = Field(default=4, ge=1, le=32)
     max_requests_per_second: float = Field(default=10.0, ge=0.1, le=500)
     request_timeout: float = Field(default=20.0, ge=1, le=300)
@@ -399,6 +406,7 @@ async def create_scan(
         "schema_artifacts": payload.schema_artifacts,
         "test_accounts": [{"username": account.get("username", "")} for account in payload.test_accounts],
         "identity_ids": list(payload.identity_ids),
+        "on_login_failure": payload.on_login_failure,
         "profile": profile.to_dict() if hasattr(profile, "to_dict") else {},
         "provider": payload.provider,
         "test_environment": payload.test_environment,

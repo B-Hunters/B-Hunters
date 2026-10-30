@@ -16,8 +16,6 @@ outside world, and it answers on one path only: every other path is a
 
 from __future__ import annotations
 
-import uuid
-
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -47,9 +45,7 @@ def test_a_token_has_an_expiry(services):
 
 
 def test_an_expired_token_is_not_accepted(services):
-    token = services.callbacks.create_token(
-        label="the ssrf test", scan_id="s1", expires_at=1.0
-    )
+    token = services.callbacks.create_token(label="the ssrf test", scan_id="s1", expires_at=1.0)
 
     assert services.callbacks.token_is_live(token["token"]) is False
 

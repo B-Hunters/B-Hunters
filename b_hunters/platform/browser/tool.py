@@ -94,9 +94,7 @@ async def browser_tool(
     application, not to take it over.
     """
     if action not in BROWSER_ACTIONS:
-        raise ToolError(
-            f"unknown browser action '{action}'; the actions are {', '.join(BROWSER_ACTIONS)}"
-        )
+        raise ToolError(f"unknown browser action '{action}'; the actions are {', '.join(BROWSER_ACTIONS)}")
 
     if action == "session_status":
         return await _session_status(context)

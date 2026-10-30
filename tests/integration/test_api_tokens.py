@@ -64,16 +64,12 @@ def test_a_revoked_token_stops_working(client, services, admin_user):
     document, plaintext = services.tokens.create(
         name="the pipeline", scopes=["scans:read"], user_id=admin_user["user_id"]
     )
-    assert client.get(
-        "/api/v1/scans", headers={"Authorization": f"Bearer {plaintext}"}
-    ).status_code == 200
+    assert client.get("/api/v1/scans", headers={"Authorization": f"Bearer {plaintext}"}).status_code == 200
 
     services.tokens.revoke(document["token_id"])
     client.cookies.clear()
 
-    assert client.get(
-        "/api/v1/scans", headers={"Authorization": f"Bearer {plaintext}"}
-    ).status_code == 401
+    assert client.get("/api/v1/scans", headers={"Authorization": f"Bearer {plaintext}"}).status_code == 401
 
 
 def test_a_token_is_created_through_the_api(client, auth_headers):
@@ -117,9 +113,10 @@ def test_a_token_is_revoked_through_the_api(client, auth_headers, services, admi
     # The browser session would authenticate the request on its own, so
     # it is dropped: what is being tested is the token.
     client.cookies.clear()
-    assert client.get(
-        "/api/v1/scans", headers={"Authorization": f"Bearer {created['token']}"}
-    ).status_code == 401
+    assert (
+        client.get("/api/v1/scans", headers={"Authorization": f"Bearer {created['token']}"}).status_code
+        == 401
+    )
 
 
 def test_a_notification_is_created_through_the_api(client, auth_headers):

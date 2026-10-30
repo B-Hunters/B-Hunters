@@ -148,9 +148,7 @@ async def _references(page: Any, base: str) -> list[str]:
     # the resource that was fetched, which is the XHR and fetch
     # traffic the DOM does not show.
     try:
-        entries = await page.evaluate(
-            "() => performance.getEntriesByType('resource').map(e => e.name)"
-        )
+        entries = await page.evaluate("() => performance.getEntriesByType('resource').map(e => e.name)")
     except Exception:
         entries = []
     for entry in entries or []:

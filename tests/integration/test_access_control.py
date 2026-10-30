@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from b_hunters.platform.agents.access_control import (
     compare_responses,
     compare_two_identities,

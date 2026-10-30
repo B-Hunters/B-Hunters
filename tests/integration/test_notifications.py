@@ -166,9 +166,7 @@ def test_the_payload_is_signed_when_there_is_a_secret(services, monkeypatch):
         secret="the shared secret",
     )
 
-    services.notifications.deliver(
-        notification, event="scan.completed", payload={"scan_id": "s1"}
-    )
+    services.notifications.deliver(notification, event="scan.completed", payload={"scan_id": "s1"})
 
     headers = sent[0]["headers"]
     assert "X-BHunters-Signature" in headers
@@ -195,9 +193,7 @@ def test_an_unsigned_webhook_is_not_signed(services, monkeypatch):
         events=["scan.completed"],
     )
 
-    services.notifications.deliver(
-        notification, event="scan.completed", payload={"scan_id": "s1"}
-    )
+    services.notifications.deliver(notification, event="scan.completed", payload={"scan_id": "s1"})
 
     assert "X-BHunters-Signature" not in sent[0]["headers"]
 
@@ -214,9 +210,7 @@ def test_a_failed_delivery_is_recorded(services, monkeypatch):
         events=["scan.completed"],
     )
 
-    result = services.notifications.deliver(
-        notification, event="scan.completed", payload={"scan_id": "s1"}
-    )
+    result = services.notifications.deliver(notification, event="scan.completed", payload={"scan_id": "s1"})
 
     assert result["delivered"] is False
     assert result["error"]
@@ -237,9 +231,7 @@ def test_a_successful_delivery_is_recorded(services, monkeypatch):
         events=["scan.completed"],
     )
 
-    services.notifications.deliver(
-        notification, event="scan.completed", payload={"scan_id": "s1"}
-    )
+    services.notifications.deliver(notification, event="scan.completed", payload={"scan_id": "s1"})
 
     deliveries = services.notifications.deliveries(notification["notification_id"])
     assert deliveries
@@ -250,9 +242,7 @@ def test_a_successful_delivery_is_recorded(services, monkeypatch):
 # The tokens
 # ----------------------------------------------------------------------
 def test_a_token_is_returned_once_and_stored_as_a_hash(services):
-    document, plaintext = services.tokens.create(
-        name="the pipeline", scopes=["scans:read"], user_id="u1"
-    )
+    document, plaintext = services.tokens.create(name="the pipeline", scopes=["scans:read"], user_id="u1")
 
     assert plaintext
     assert document["token_hash"] != plaintext
@@ -261,17 +251,13 @@ def test_a_token_is_returned_once_and_stored_as_a_hash(services):
 
 
 def test_the_plaintext_is_not_in_the_stored_document(services):
-    document, plaintext = services.tokens.create(
-        name="the pipeline", scopes=["scans:read"], user_id="u1"
-    )
+    document, plaintext = services.tokens.create(name="the pipeline", scopes=["scans:read"], user_id="u1")
 
     assert plaintext not in json.dumps(document, default=str)
 
 
 def test_a_token_authenticates(services):
-    _document, plaintext = services.tokens.create(
-        name="the pipeline", scopes=["scans:read"], user_id="u1"
-    )
+    _document, plaintext = services.tokens.create(name="the pipeline", scopes=["scans:read"], user_id="u1")
 
     resolved = services.tokens.authenticate(plaintext)
 
@@ -285,9 +271,7 @@ def test_a_wrong_token_authenticates_nothing(services):
 
 
 def test_a_revoked_token_authenticates_nothing(services):
-    document, plaintext = services.tokens.create(
-        name="the pipeline", scopes=["scans:read"], user_id="u1"
-    )
+    document, plaintext = services.tokens.create(name="the pipeline", scopes=["scans:read"], user_id="u1")
     services.tokens.revoke(document["token_id"])
 
     assert services.tokens.authenticate(plaintext) is None

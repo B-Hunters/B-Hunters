@@ -28,6 +28,7 @@ from typing import Any, Optional, Protocol
 
 from .agents.factory import build_orchestrator, build_scan_context
 from .api.deps import Services
+from .browser.login import record_login, store_session
 
 log = logging.getLogger(__name__)
 
@@ -93,9 +94,94 @@ class ScanJobExecutor:
         scan = self.services.scans.get(scan_id)
         if scan is None:
             raise RuntimeError("the scan does not exist")
+        # The session is checked before the scan runs.  A scan that
+        # finds out in the worker phase that its session has expired
+        # spends the whole worker phase on a target it cannot reach.
+        preflight = await self.preflight_identity(scan)
+        if preflight["status"] == "failed":
+            raise RuntimeError(f"the session of the identity could not be established: {preflight['reason']}")
+
         context = build_scan_context(scan, self.services.settings)
         orchestrator = build_orchestrator(self.services)
         return await orchestrator.run(context)
+
+    # ------------------------------------------------------------------
+    # The preflight
+    # ------------------------------------------------------------------
+    async def preflight_identity(self, scan: Any) -> dict[str, Any]:
+        """Check the session of the identity the scan names.
+
+        The session is verified against the identity's ``verify_url`` —
+        a page that *requires* the session.  When it is missing,
+        expired or failing, it is refreshed through the login
+        recorder.
+
+        A refresh that fails fails the scan, unless the template says
+        ``on_login_failure: continue_unauthenticated``: then the scan
+        runs without a session and says so.  Either way a notification
+        is sent.
+        """
+        definition = dict(getattr(scan, "definition", {}) or {})
+        identity_ids = list(definition.get("identity_ids") or [])
+        if not identity_ids:
+            return {"status": "not_needed", "reason": ""}
+
+        identity_id = str(identity_ids[0])
+        repository = self.services.identities
+        identity = repository.get(identity_id)
+        if identity is None:
+            reason = f"the identity '{identity_id}' does not exist"
+            self.notify("identity.login_failed", {"reason": reason, "identity_id": identity_id})
+            return {"status": "failed", "reason": reason}
+
+        if self._session_is_live(repository, identity):
+            return {"status": "verified", "reason": "", "identity_id": identity_id}
+
+        result = await self._refresh(repository, identity, definition)
+        if result.get("status") == "verified":
+            return {"status": "verified", "reason": "", "identity_id": identity_id}
+
+        reason = str(result.get("reason", "") or "the login failed")
+        self.notify(
+            "identity.login_failed",
+            {"reason": reason, "identity_id": identity_id, "scan_id": getattr(scan, "scan_id", "")},
+        )
+        if str(definition.get("on_login_failure", "")) == "continue_unauthenticated":
+            return {"status": "continued_unauthenticated", "reason": reason}
+        return {"status": "failed", "reason": reason}
+
+    @staticmethod
+    def _session_is_live(repository: Any, identity: dict[str, Any]) -> bool:
+        """Whether the identity holds a session that has not expired."""
+        expires_at = identity.get("session_expires_at")
+        if not expires_at:
+            return False
+        if float(expires_at) <= time.time():
+            return False
+        return bool(repository.auth_payload(str(identity.get("identity_id", ""))))
+
+    async def _refresh(
+        self, repository: Any, identity: dict[str, Any], definition: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Log in again and keep the session."""
+        identity_id = str(identity.get("identity_id", ""))
+        secrets = repository.secrets_for(identity_id)
+        hosts = list((definition.get("targets") or {}).get("authorized_hosts") or [])
+        result = await record_login(
+            identity=identity,
+            secrets=secrets,
+            authorized_hosts=hosts,
+        )
+        if result.get("status") == "verified":
+            store_session(repository, identity_id, result)
+        return result
+
+    def notify(self, event: str, payload: dict[str, Any]) -> None:
+        """Tell the webhooks about something that happened."""
+        try:
+            self.services.notifications.notify(event, payload)
+        except Exception:  # a webhook that is down is not a crash
+            log.exception("could not deliver the notification for %s", event)
 
     async def _login(self, job: dict[str, Any]) -> dict[str, Any]:
         """Log in as an identity and keep the session.
