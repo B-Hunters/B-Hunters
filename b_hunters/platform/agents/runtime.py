@@ -109,9 +109,7 @@ def _wrap_up_message(*, rounds: int, tool_calls: int, tokens: int, budget: Budge
     return None
 
 
-def _evidence_seen(
-    tool_records: Sequence[dict[str, Any]], said: Collection[str] = ()
-) -> tuple[Any, ...]:
+def _evidence_seen(tool_records: Sequence[dict[str, Any]], said: Collection[str] = ()) -> tuple[Any, ...]:
     """What the role has produced so far.
 
     The fingerprint is the number of distinct outputs, the number of URLs
