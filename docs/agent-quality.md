@@ -95,3 +95,29 @@ bounded: a rate, a concurrency and a timeout. sqlmap was also pointed at
 the root of the target and asked for level 1 and risk 1, which is the
 shallowest setting it has; it now crawls, asks for more, and ignores
 the 401s of an application that answers them. See `docs/tooling.md`.
+
+## How many roles a scan runs
+
+The measured cost of one role, from a scan of the laboratory:
+
+| Role | Rounds | Tokens | Wall clock |
+|---|---|---|---|
+| `javascript` | 7 | 156,371 | 150 s |
+| `api` | 7 | 141,449 | 158 s |
+| `authn` | 9 | 242,766 | 198 s |
+| `access_control` | 7 | 101,268 | 159 s |
+
+Twelve roles at four at a time need about **nine minutes of agent
+time**, before the workers have taken their share. A fifteen-minute
+scan cannot hold all of them, and starting twelve roles it cannot
+finish leaves every finding unverified.
+
+`BHUNTERS_AGENT_MAX_ROLES` (four in the deployment) decides how many
+roles run. The roles are admitted **in the order of their yield** —
+`recon` maps the surface, then the client-side and the API roles work
+on it — and the roles that do not run are recorded as `wall_clock` with
+the reason, not left pending. A scan that says what it did not do is
+worth more than one that looks busy.
+
+To run every role, give the scan the time: at the measured cost,
+twelve roles need a scan of roughly forty minutes.
