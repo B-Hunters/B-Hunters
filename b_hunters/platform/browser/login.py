@@ -230,7 +230,7 @@ async def _verify(
     return True, ""
 
 
-async def store_session(
+def store_session(
     repository: IdentityRepository,
     identity_id: str,
     result: dict[str, Any],

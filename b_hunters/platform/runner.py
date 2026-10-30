@@ -82,8 +82,10 @@ class ScanJobExecutor:
         self.services = services
 
     async def execute(self, job: dict[str, Any]) -> dict[str, Any]:
-        """Run the scan of a job and return the orchestrator's result."""
+        """Run the job and return its result."""
         kind = str(job.get("kind", ""))
+        if kind == "identity_login":
+            return await self._login(job)
         if kind != "scan":
             return {"status": "skipped", "kind": kind}
         payload = job.get("payload") or {}
@@ -94,6 +96,43 @@ class ScanJobExecutor:
         context = build_scan_context(scan, self.services.settings)
         orchestrator = build_orchestrator(self.services)
         return await orchestrator.run(context)
+
+    async def _login(self, job: dict[str, Any]) -> dict[str, Any]:
+        """Log in as an identity and keep the session.
+
+        The credentials are decrypted here, in the runner: the API
+        never decrypts, and the session it produces is stored back on
+        the identity, encrypted.
+        """
+        from .browser.login import record_login, store_session
+
+        payload = job.get("payload") or {}
+        identity_id = str(payload.get("identity_id", ""))
+        repository = self.services.identities
+        identity = repository.get(identity_id)
+        if identity is None:
+            raise RuntimeError("the identity does not exist")
+
+        secrets = repository.secrets_for(identity_id)
+        result = await record_login(
+            identity=identity,
+            secrets=secrets,
+            authorized_hosts=list(payload.get("authorized_hosts", []) or []),
+        )
+        if result.get("status") == "verified":
+            store_session(repository, identity_id, result)
+        self.services.audit.record(
+            action="identity.login",
+            actor="runner",
+            target_type="identity",
+            target_id=identity_id,
+            detail={"status": result.get("status", ""), "reason": result.get("reason", "")},
+        )
+        return {
+            "status": result.get("status", "failed"),
+            "reason": result.get("reason", ""),
+            "identity_id": identity_id,
+        }
 
 
 class Runner:
