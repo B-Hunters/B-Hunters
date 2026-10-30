@@ -192,6 +192,7 @@ def test_the_command_does_not_wait_when_it_is_told_not_to():
 
 def test_an_answer_the_command_does_not_know_produces_no_findings():
     """A shape the command does not know must not crash it."""
+
     def platform(method, path, body=None):
         if method == "GET" and path.startswith("/findings"):
             return 200, {"something": "else"}
