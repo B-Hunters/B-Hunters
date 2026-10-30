@@ -905,18 +905,29 @@ class ScanOrchestrator:
     def _agent_budget(role: Any, key: str, default: int, override: int) -> int:
         """The budget of one agent task.
 
-        The role carries a default, and the deployment can raise it.  The
-        override is a floor and not a replacement: a reasoning model needs
-        more of the token budget than a plain one - it spends a large part
-        of every turn on reasoning, and the prompt grows with every tool
-        result - so the deployment's value wins where the role asks for
-        less.  A role that asks for *more* keeps it: the role knows the
-        work better than the deployment does.
+        The role carries a default, and the deployment can change it.
+
+        The two budgets behave differently on purpose:
+
+        * the **rounds** are a *cap*.  A role that declares six rounds
+          gets six, whatever the deployment says: every role spending
+          every round it was given is how a scan pays for twenty-four
+          rounds of nothing.  A deployment that wants fewer rounds
+          lowers the cap; one that wants more raises it, but only above
+          what the role asks for.
+        * the **tokens** and the **tool calls** are a *floor*.  A
+          reasoning model needs more of both than a plain one: it spends
+          a large part of every turn on reasoning, and the prompt grows
+          with every tool result - so the deployment's value wins where
+          the role asks for less.  A role that asks for *more* keeps it:
+          the role knows the work better than the deployment does.
         """
         role_value = int((role.budget or {}).get(key, default))
-        if override:
-            return max(role_value, int(override))
-        return role_value
+        if not override:
+            return role_value
+        if key == "max_rounds":
+            return min(role_value, int(override))
+        return max(role_value, int(override))
 
     def _budget_for_task(self, context: ScanContext, role: Any, task: AgentTask) -> Budget:
         """The budget of one agent task, scaled for a role that judges findings.
@@ -1578,7 +1589,7 @@ class ScanOrchestrator:
                 if run.status == "succeeded":
                     self.tasks.set_status(task.task_id, "succeeded", result=run.to_dict())
                     completed.add(task.task_id)
-                elif run.status in ("wall_clock", "cancelled"):
+                elif run.status in ("wall_clock", "cancelled", "no_new_evidence"):
                     # The stop reason is the status of the task: a role
                     # that was cut off is not a failure, and it is not a
                     # success either.

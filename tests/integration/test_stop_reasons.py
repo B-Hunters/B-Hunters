@@ -248,24 +248,26 @@ async def test_a_task_that_already_succeeded_keeps_its_result(orchestrator_parts
     """A deadline that passes later does not undo the work that was done."""
     orchestrator, provider, services = orchestrator_parts
     scan = _scan(services, "resumed scan")
-    provider.script = [_conclusion("done")]
+    # The two roles share the scripted provider, so each of them needs a
+    # conclusion of its own.
+    provider.script = [_conclusion("done"), _conclusion("done too")]
     context = _context(services, scan_id=scan.scan_id)
     context.profile.agent_roles = ["recon", "api"]
     await orchestrator.run(context)
 
-    finished = services.tasks.list_for_scan(scan.scan_id)
+    finished = {task["task_id"]: task for task in services.tasks.list_for_scan(scan.scan_id)}
     assert finished
-    assert all(task["status"] == "succeeded" for task in finished)
+    # A role that concluded did its work.
+    assert all(task["status"] == "succeeded" for task in finished.values()), finished
 
     # The scan is picked up again after its deadline has passed.
     services.scans.update(scan.scan_id, {"phase": "agents", "deadline_at": time.time() - 1})
-    provider.script = [_conclusion("done again")]
+    provider.script = [_conclusion("done again"), _conclusion("done again too")]
     await orchestrator.run(context)
 
     tasks = {task["task_id"]: task for task in services.tasks.list_for_scan(scan.scan_id)}
-    for task in tasks.values():
-        assert task["status"] == "succeeded"
-        assert task["result"]["stop_reason"] == "completed"
+    assert tasks[f"{scan.scan_id}:recon"]["status"] == "succeeded"
+    assert tasks[f"{scan.scan_id}:recon"]["result"]["stop_reason"] == "completed"
 
 
 # ----------------------------------------------------------------------

@@ -216,6 +216,7 @@ STOP_REASONS = {
     "budget_exhausted": "budget_exhausted",
     "wall_clock": "wall_clock",
     "cancelled": "cancelled",
+    "no_new_evidence": "no_new_evidence",
     "failed": "failed",
 }
 

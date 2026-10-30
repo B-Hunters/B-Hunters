@@ -17,7 +17,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -65,6 +65,9 @@ class AgentRuntimeConfig:
     tool_timeout: float = 90.0
     #: Repeat the same tool call with identical arguments at most this often.
     max_identical_calls: int = 2
+    #: How many rounds in a row may produce nothing new before the task
+    #: ends.  Zero means the runtime never stops a role for that reason.
+    max_empty_rounds: int = 3
     #: Temperature used for agent reasoning.
     temperature: float = 0.0
     #: Whether the model is asked to return structured JSON.
@@ -104,6 +107,30 @@ def _wrap_up_message(*, rounds: int, tool_calls: int, tokens: int, budget: Budge
             "Summarise what you have found and produce your final JSON answer now."
         )
     return None
+
+
+def _evidence_seen(
+    tool_records: Sequence[dict[str, Any]], said: Collection[str] = ()
+) -> tuple[Any, ...]:
+    """What the role has produced so far.
+
+    The fingerprint is the number of distinct outputs, the number of URLs
+    that appeared in them and the number of distinct things the role
+    said.  A round that does not change it produced nothing the role did
+    not already know: the *number* of calls is not part of it, because
+    making the same call again is not learning anything, and neither is
+    saying the same thing again.
+
+    What the role *says* counts: a role that reports in prose without
+    calling a tool has still produced something, and a round in which it
+    said something new is not an empty round.
+    """
+    outputs = {str(record.get("output", "")) for record in tool_records}
+    urls: set[str] = set()
+    for record in tool_records:
+        for match in re.finditer(r"https?://[^\s\"'<>]+", str(record.get("output", ""))):
+            urls.add(match.group(0))
+    return (len(outputs), len(urls), len(set(said)))
 
 
 @dataclass
@@ -205,6 +232,10 @@ class AgentRuntime:
         tokens_used = 0
         tool_calls_used = 0
         rounds = 0
+        empty_rounds = 0
+        evidence_seen: Optional[tuple[Any, ...]] = None
+        said_so_far: set[str] = set()
+        texts_said: list[str] = []
         last_text = ""
         state = {"requests": 0, "rounds": 0, "tool_calls": 0, "tokens": 0}
 
@@ -270,6 +301,8 @@ class AgentRuntime:
                     said = _node_text(node)
                     if said:
                         last_text = said
+                        said_so_far.add(said)
+                        texts_said.append(said)
                     if Agent.is_model_request_node(node):
                         rounds += 1
                         # The framework counts the requests itself, and
@@ -296,6 +329,49 @@ class AgentRuntime:
                         # answers are in.  The nudge counts the rounds
                         # that are done, not the ones that are prepared.
                         state["rounds"] = rounds
+                        # A round that found nothing new is a round the
+                        # model spent without learning anything.  Three
+                        # of them in a row mean the role has nothing
+                        # left to look at, and the task ends with what
+                        # it has rather than spending the rest of its
+                        # budget asking the same question again.
+                        seen = _evidence_seen(tool_records, said_so_far)
+                        if evidence_seen is not None and seen == evidence_seen:
+                            empty_rounds += 1
+                        else:
+                            empty_rounds = 0
+                            evidence_seen = seen
+                        if empty_rounds >= self.config.max_empty_rounds:
+                            run.status = "no_new_evidence"
+                            run.error = f"the role found nothing new in {empty_rounds} round(s) and stopped"
+                            log.info(
+                                "the role %s found nothing new in %s round(s)",
+                                self.role.role,
+                                empty_rounds,
+                            )
+                            # The role stopped for want of something to
+                            # look at, not because it found nothing: what
+                            # it worked out is kept.  A role that already
+                            # concluded - in prose, because the model did
+                            # not use the answer tool - has done its
+                            # work, and the stop does not undo it.
+                            if not run.conclusion:
+                                for text in reversed(texts_said):
+                                    parsed = _structured_conclusion(text)
+                                    if not parsed:
+                                        continue
+                                    run.conclusion = parsed["conclusion"]
+                                    run.confidence = _confidence(parsed["confidence"])
+                                    run.observations = list(parsed["observations"])
+                                    run.next_step = str(parsed["next_step"] or "")
+                                    run.uncertainty = str(parsed["uncertainty"] or "")
+                                    run.findings = list(parsed["findings"])
+                                    run.status = "succeeded"
+                                    run.error = ""
+                                    break
+                                if run.status != "succeeded" and last_text:
+                                    run.conclusion = last_text
+                            break
                     elif Agent.is_end_node(node):
                         conclusion = normalise_conclusion(node.data.output)
                         run.conclusion = conclusion["conclusion"]
@@ -550,6 +626,30 @@ def _answer_shaped_failure(run: Any) -> bool:
         return True
     error = str(run.error or "")
     return any(marker in error for marker in ANSWER_SHAPED_FAILURES)
+
+
+def _structured_conclusion(text: str) -> dict[str, Any] | None:
+    """The conclusion a model wrote as a structured answer.
+
+    The prose fallback reads any sentence as a conclusion, which is the
+    right thing when a role answers once and finishes.  It is the wrong
+    thing when a role keeps saying the same sentence: then the sentence
+    is not an answer, it is a repetition.  Only an answer that carries
+    the fields of a conclusion counts.
+    """
+    body = (text or "").strip()
+    start = body.find("{")
+    end = body.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        payload = json.loads(body[start : end + 1])
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict) or "conclusion" not in payload:
+        return None
+    parsed = normalise_conclusion(conclusion_from_text(body))
+    return parsed if parsed["conclusion"] else None
 
 
 def _node_text(node: Any) -> str:
