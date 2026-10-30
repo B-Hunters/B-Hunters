@@ -138,6 +138,87 @@ class AssetRepository:
         cursor = self._col.find(query).sort("url", 1).skip(max(0, int(offset))).limit(capped)
         return [{key: value for key, value in document.items() if key != "_id"} for document in cursor]
 
+    def hosts_across_scans(
+        self,
+        *,
+        host: str = "",
+        kind: str = "",
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Every host the platform has seen, across every scan.
+
+        A host that was seen in two scans is one host: it is listed
+        once, with the scans it was seen in, the URLs that were found
+        on it, and when it was first and last seen.
+        """
+        query: dict[str, Any] = {}
+        if host:
+            query["host"] = host
+        if kind:
+            query["kind"] = kind
+        pipeline = [
+            {"$match": query},
+            {
+                "$group": {
+                    "_id": "$host",
+                    "urls": {"$addToSet": "$url"},
+                    "scans": {"$addToSet": "$scan_id"},
+                    "first_seen": {"$min": "$first_seen_at"},
+                    "last_seen": {"$max": "$last_seen_at"},
+                }
+            },
+            {"$sort": {"last_seen": -1}},
+            {"$limit": max(1, min(int(limit), 2000))},
+        ]
+        rows: list[dict[str, Any]] = []
+        for entry in self._col.aggregate(pipeline):
+            rows.append(
+                {
+                    "host": entry.get("_id", ""),
+                    "urls": sorted(str(url) for url in entry.get("urls", []) if url),
+                    "scans": sorted(str(scan) for scan in entry.get("scans", []) if scan),
+                    "first_seen": entry.get("first_seen"),
+                    "last_seen": entry.get("last_seen"),
+                    "open_findings": self._open_findings(entry.get("_id", "")),
+                    "technologies": self._technologies(entry.get("_id", "")),
+                    "ports": self._ports(entry.get("_id", "")),
+                }
+            )
+        return rows
+
+    def _open_findings(self, host: str) -> int:
+        """The findings that are still open on a host."""
+        if not host:
+            return 0
+        return int(
+            self._db.collection("platform_findings").count_documents(
+                {"host": host, "verification_status": {"$in": ["confirmed", "likely", "unverified"]}}
+            )
+        )
+
+    def _technologies(self, host: str) -> list[str]:
+        """The technologies the platform identified on a host."""
+        if not host:
+            return []
+        names = {
+            str(row.get("title", ""))
+            for row in self._db.collection("platform_findings").find(
+                {"host": host, "detection_source": "technology"}
+            )
+        }
+        return sorted(name for name in names if name)
+
+    def _ports(self, host: str) -> list[int]:
+        """The ports the platform saw on a host."""
+        if not host:
+            return []
+        ports = set()
+        for row in self._db.collection("platform_services").find({"host": host}):
+            port = row.get("port")
+            if port:
+                ports.add(int(port))
+        return sorted(ports)
+
     def counts_for_scan(self, scan_id: str) -> dict[str, int]:
         """How many assets of a scan there are per kind."""
         counts: dict[str, int] = dict.fromkeys(ASSET_KINDS, 0)

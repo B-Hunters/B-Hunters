@@ -29,6 +29,7 @@ from typing import Any, Optional, Protocol
 from .agents.factory import build_orchestrator, build_scan_context
 from .api.deps import Services
 from .browser.login import record_login, store_session
+from .scan_factory import create_scan_from_template
 
 log = logging.getLogger(__name__)
 
@@ -319,12 +320,62 @@ class Runner:
     # ------------------------------------------------------------------
     # The runner loop
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # The schedules
+    # ------------------------------------------------------------------
+    def claim_due_schedules(self) -> list[dict[str, Any]]:
+        """Claim the schedules whose time has come and enqueue their scans.
+
+        The claim is atomic, so two runners produce one scan between
+        them and not two.  A schedule that cannot be turned into a scan
+        is recorded and skipped: one broken schedule must not stop the
+        others.
+        """
+        claimed: list[dict[str, Any]] = []
+        for _ in range(10):
+            schedule = self.services.schedules.claim_due()
+            if schedule is None:
+                break
+            try:
+                scan_id = self.enqueue_scheduled_scan(schedule)
+            except Exception as exc:
+                log.warning("the schedule %s could not be run: %s", schedule.get("name"), exc)
+                continue
+            claimed.append({"schedule_id": schedule.get("schedule_id", ""), "scan_id": scan_id})
+        return claimed
+
+    def enqueue_scheduled_scan(self, schedule: dict[str, Any]) -> str:
+        """Turn a schedule into a scan and queue it."""
+        template = dict(schedule.get("template") or {})
+        record = create_scan_from_template(
+            self.services,
+            template=template,
+            name=str(schedule.get("name") or "the schedule"),
+        )
+        scan_id = record.scan_id
+        self.services.jobs.enqueue(
+            kind="scan",
+            payload={"scan_id": scan_id, "target_key": getattr(record, "target_key", "")},
+            max_attempts=self.services.settings.job_max_attempts,
+        )
+        self.services.scans.set_status(scan_id, "queued")
+        self.services.events.append(
+            scan_id=scan_id,
+            kind="scan.queued",
+            payload={"schedule_id": schedule.get("schedule_id", "")},
+            actor="schedule",
+        )
+        self.services.schedules.record_run(str(schedule.get("schedule_id", "")), scan_id)
+        log.info("the schedule %s produced the scan %s", schedule.get("name"), scan_id)
+        return scan_id
+
     async def run_forever(self) -> None:
         """Run jobs until the runner is drained."""
         while not self._drained:
             if self._drain_requested():
                 log.info("the runner was asked to drain; it will not claim new jobs")
                 self.drain()
+            self.claim_due_schedules()
             result = await self.run_once()
             if result is None:
                 await asyncio.sleep(self.config.poll_seconds)

@@ -32,6 +32,7 @@ from .routers import (
     karton,
     notifications,
     scans,
+    schedules,
 )
 
 log = logging.getLogger(__name__)
@@ -82,6 +83,8 @@ def create_app(
     app.include_router(scans.router, prefix=prefix)
     app.include_router(assets.router, prefix=prefix)
     app.include_router(inventory.router, prefix=prefix)
+    app.include_router(inventory.inventory_router, prefix=prefix)
+    app.include_router(schedules.router, prefix=prefix)
     app.include_router(identities.router, prefix=prefix)
     app.include_router(findings.router, prefix=prefix)
     app.include_router(karton.router, prefix=prefix)

@@ -14,7 +14,32 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..deps import CurrentUser, Services, current_user, get_services
 
+#: The inventory of one scan.
 router = APIRouter(prefix="/scans", tags=["assets"])
+
+#: The inventory across every scan.
+inventory_router = APIRouter(tags=["assets"])
+
+
+@inventory_router.get("/inventory")
+async def cross_scan_inventory(
+    host: str = "",
+    kind: str = "",
+    limit: int = 500,
+    user: CurrentUser = Depends(current_user),
+    services: Services = Depends(get_services),
+) -> dict[str, Any]:
+    """What the platform knows about every host it has seen.
+
+    A host that was seen in two scans is one host, listed once, with
+    its first sighting and its last.  The platform has to be able to
+    say what it knows about a host, not only what one scan of it found.
+    """
+    from ...db.assets import AssetRepository
+
+    repository = AssetRepository(services.db)
+    hosts = repository.hosts_across_scans(host=host, kind=kind, limit=limit)
+    return {"hosts": hosts, "count": len(hosts)}
 
 
 @router.get("/{scan_id}/assets")

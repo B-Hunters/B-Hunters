@@ -15,7 +15,7 @@ from ...agents.orchestrator import (
     VERIFICATION_ROLES,
     ScanProfile,
 )
-from ...scan_keys import compute_comparison_key, compute_target_key
+from ...scan_factory import build_scan
 from ...scanners import worker_output
 from ...security.scope import ScopeEnforcer, build_policy_from_scan
 from ..deps import (
@@ -397,61 +397,22 @@ async def create_scan(
         ),
     )
 
-    definition = {
-        "description": payload.description,
-        "targets": result["accepted_urls"],
-        "start_paths": payload.targets.start_paths,
-        "url_lists": payload.targets.url_lists,
-        "artifacts": payload.artifacts,
-        "schema_artifacts": payload.schema_artifacts,
-        "test_accounts": [{"username": account.get("username", "")} for account in payload.test_accounts],
-        "identity_ids": list(payload.identity_ids),
-        "on_login_failure": payload.on_login_failure,
-        "profile": profile.to_dict() if hasattr(profile, "to_dict") else {},
-        "provider": payload.provider,
-        "test_environment": payload.test_environment,
-        "safe_mode": payload.safe_mode,
-    }
-    scope = {
-        "authorized_hosts": result["authorized_hosts"],
-        "excluded_paths": payload.targets.excluded_paths,
-        "allow_private_network": payload.test_environment,
-        "allow_state_changing": payload.allow_state_changing,
-        "max_requests_per_second": payload.max_requests_per_second,
-        "max_concurrency": payload.max_concurrency,
-        "request_timeout": payload.request_timeout,
-        "max_duration_seconds": payload.max_duration_seconds,
-    }
-
-    # The identity of the target, and of what the scan does to it.  The
-    # two keys say whether two scans may be compared with each other.
-    target_key = compute_target_key(
+    # The document of the scan.  The runner makes the same document when
+    # a schedule comes due, so that a scheduled scan and a requested one
+    # are comparable.
+    document = build_scan(
+        name=payload.name,
+        payload=payload.model_dump(),
+        profile=profile,
+        accepted_urls=result["accepted_urls"],
         authorized_hosts=result["authorized_hosts"],
-        targets=result["accepted_urls"],
+        description=payload.description,
+        created_by=user.username,
+        created_by_id=user.user_id,
     )
-    comparison_key = compute_comparison_key(
-        target_key=target_key,
-        excluded_paths=payload.targets.excluded_paths,
-        profile=profile.name,
-        scanners=profile.scanners,
-        agent_roles=profile.agent_roles,
-        # The identity vault arrives in phase 2a.
-        identity_ids=[],
-    )
+    scope = document["scope"]
 
-    record = services.scans.create(
-        {
-            "name": payload.name,
-            "status": "queued",
-            "created_by": user.username,
-            "created_by_id": user.user_id,
-            "definition": definition,
-            "scope": scope,
-            "stats": {},
-            "target_key": target_key,
-            "comparison_key": comparison_key,
-        }
-    )
+    record = services.scans.create(document)
     services.events.append(
         scan_id=record.scan_id,
         kind="scan.created",

@@ -33,6 +33,7 @@ from ..db.repositories import (
     UserRepository,
 )
 from ..db.worker_output_repository import WorkerOutputRepository
+from ..schedules import ScheduleRepository
 from ..security.secrets import SecretBox
 from ..security.sessions import (
     Session,
@@ -124,6 +125,8 @@ class Services:
         self.identities = IdentityRepository(self.db, secret_box=self.secret_box)
         #: One scan per target at a time.
         self.locks = TargetLockRepository(self.db)
+        #: The scans that happen on their own.
+        self.schedules = ScheduleRepository(self.db)
 
     def ensure_indexes(self) -> None:
         self.db.ensure_indexes()
