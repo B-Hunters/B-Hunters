@@ -31,6 +31,36 @@ The runner claims a job with one atomic `find_one_and_update` over
 expired — sorted by priority and age. A job can therefore only ever be
 claimed once, no matter how many runners are running.
 
+## The schedules
+
+A schedule is a scan that happens on its own. The runner claims the
+schedules whose time has come and enqueues the same job the API
+enqueues, so a scheduled scan and a requested scan are the same thing.
+
+The claim is atomic: the schedule is only advanced when its
+`next_run_at` is still the one that was read. Two runners that both
+find a due schedule produce exactly one scan between them, and the
+loser tries the next schedule.
+
+```bash
+curl -X POST http://bhunter/api/v1/schedules \
+  -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' -d '{
+    "name": "the nightly scan",
+    "cron": "0 3 * * *",
+    "template": {
+      "targets": {"urls": ["https://demo.test/"], "authorized_hosts": ["demo.test"]},
+      "profile": "standard"
+    }
+  }'
+```
+
+`POST /api/v1/schedules/{id}/run` runs one now, without waiting for
+its next run.
+
+A scheduled scan is built by the same factory the API uses, so it
+carries the same comparison key as a requested scan of the same target
+with the same template — which is what lets the diff compare them.
+
 ## The lease
 
 The claim sets `lease_owner` and `lease_expires_at` (60 seconds by
