@@ -123,6 +123,43 @@ services:
       retries: 3
       start_period: 20s
 
+  # --- the callback service ---------------------------------------------
+  # The only part of the platform that is exposed to the outside world.
+  # A blind vulnerability is confirmed by the target reaching back, so
+  # the target has to be able to reach this.  It answers on one path —
+  # the path of a live token — and on nothing else.
+  callbacks:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: b-hunters-platform:1.2.0
+    container_name: bhunter_callbacks
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    command: ["b-hunters", "callbacks"]
+    environment:
+      - BHUNTERS_HOST=0.0.0.0
+      - BHUNTERS_PORT=8081
+      - BHUNTERS_MONGO_URI=mongodb://bhunter:bhunter_dev_pw@mongo:27017/?authSource=admin
+      - BHUNTERS_MONGO_DB=b-hunters
+      # The address the *target* reaches, not the address the platform
+      # uses internally.
+      - BHUNTERS_CALLBACK_BASE_URL=${BHUNTERS_CALLBACK_BASE_URL:-}
+    networks:
+      bhunter:
+        ipv4_address: 172.25.0.60
+    ports:
+      # The port the target reaches.  It is the only exposed port of the
+      # platform, and it serves one path.
+      - "${BHUNTERS_CALLBACK_PORT:-8081}:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8081/readyz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
   # --- the runner ------------------------------------------------------
   # The runner executes the scans.  It is a separate process from the
   # API on purpose: a scan used to be an asyncio task inside the API,

@@ -593,6 +593,8 @@ BUILTIN_ROLES: list[AgentRole] = [
             "list_findings",
             "list_assets",
             "list_worker_output",
+            "create_callback",
+            "list_callbacks",
         ],
         permissions=_perms(
             [CAPABILITY_NETWORK, CAPABILITY_READ],
@@ -602,6 +604,8 @@ BUILTIN_ROLES: list[AgentRole] = [
                 "list_findings",
                 "list_assets",
                 "list_worker_output",
+                "create_callback",
+                "list_callbacks",
             ],
         ),
         output_schema=AGENT_OUTPUT_SCHEMA,
@@ -617,9 +621,12 @@ BUILTIN_ROLES: list[AgentRole] = [
             "coerced outside their intended boundary."
         ),
         system_prompt=(
-            "You look for server-side request forgery and path traversal. For SSRF, use a "
-            "controlled callback host provided by the platform, or an in-scope host that is "
-            "known to be reachable, and never a public scanning service. Do not target "
+            "You look for server-side request forgery and path traversal. For SSRF, use the "
+            "platform's own callback service: call create_callback to get an address, put "
+            "it in the parameter you are testing, and then call list_callbacks to see "
+            "whether the target reached back. A callback that arrives is the evidence that "
+            "the vulnerability reproduces; a finding with no callback is a hypothesis. "
+            "Never use a public scanning service. Do not target "
             "loopback, private or metadata addresses, and do not attempt to reach internal "
             "infrastructure beyond the minimum needed to demonstrate reachability. For path "
             "traversal, use a non-existent, obviously inert path such as a unique marker with "

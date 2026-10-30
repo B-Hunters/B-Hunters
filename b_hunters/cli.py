@@ -207,6 +207,12 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
         "--strict", action="store_true", help=f"{Fore.YELLOW}Exit non-zero on warnings as well as errors"
     )
 
+    callbacks_parser = subparsers.add_parser(
+        "callbacks", help=f"{Fore.CYAN}Run the out-of-band callback service"
+    )
+    callbacks_parser.add_argument("--host", type=str, default=None, help=f"{Fore.YELLOW}Bind address")
+    callbacks_parser.add_argument("--port", type=int, default=None, help=f"{Fore.YELLOW}Bind port")
+
     # CI command
     ci_parser = subparsers.add_parser("ci", help=f"{Fore.CYAN}Scan from a pipeline")
     ci_sub = ci_parser.add_subparsers(dest="ci_command", required=True)
@@ -258,6 +264,8 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
         return _runner(args)
     if args.command == "ci":
         return _ci(args)
+    if args.command == "callbacks":
+        return _callbacks(args)
 
     config = Config(path=args.config)
     global db, s3, producer
@@ -1134,6 +1142,25 @@ def _runner(args):
 
     logging.info(f"{Fore.GREEN}The runner '{config.owner}' is taking jobs from the queue.")
     asyncio.run(runner.run_forever())
+    return 0
+
+
+def _callbacks(args) -> int:
+    """Run the out-of-band callback service.
+
+    This is the only part of the platform that is exposed to the
+    outside world, so it runs on its own port and answers on one path.
+    """
+    import uvicorn
+
+    from b_hunters.platform.callbacks import build_app
+    from b_hunters.platform.settings import load_settings
+
+    settings = load_settings()
+    host = args.host or settings.host
+    port = args.port or 8081
+    logging.info(f"{Fore.GREEN}Starting the B-Hunters callback service on http://{host}:{port}")
+    uvicorn.run(build_app(settings), host=host, port=port, log_level=settings.log_level.lower())
     return 0
 
 

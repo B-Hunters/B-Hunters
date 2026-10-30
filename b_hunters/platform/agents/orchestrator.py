@@ -28,6 +28,7 @@ from urllib.parse import urljoin, urlsplit
 
 from ..assets import classify, is_external, normalise_url
 from ..db.assets import AssetRepository, WorkerRunRepository
+from ..db.callbacks import CallbackRepository
 from ..db.client import Database
 from ..db.notifications import NOTIFICATION_EVENTS, NotificationRepository
 from ..db.repositories import (
@@ -488,6 +489,8 @@ class ScanOrchestrator:
         self.worker_runs = WorkerRunRepository(database)
         #: The webhooks the operator asked to be told about.
         self.notifications = NotificationRepository(database)
+        #: The out-of-band callback tokens and the hits they received.
+        self.callbacks = CallbackRepository(database)
         self.provider_factory = provider_factory
         self.tool_registry = tool_registry or ToolRegistry()
         self.scanner_registry = scanner_registry or AdapterRegistry()
@@ -2290,6 +2293,10 @@ class ScanOrchestrator:
                 # The URLs the scan saw, so that an agent can list them
                 # instead of crawling the target a second time.
                 "asset_repository": self.assets,
+                # The callback service, so that an agent can confirm a
+                # blind finding instead of guessing at it.
+                "callbacks_repository": self.callbacks,
+                "callback_base_url": self.settings.callback_base_url,
                 "scan_id": context.scan_id,
             },
         )

@@ -10,6 +10,12 @@ from ..gateway import (
     CAPABILITY_WRITE,
     ToolRegistry,
 )
+from .callbacks import (
+    CREATE_CALLBACK_SCHEMA,
+    LIST_CALLBACKS_SCHEMA,
+    create_callback,
+    list_callbacks,
+)
 from .files import LIST_FILES_SCHEMA, READ_FILE_SCHEMA, WRITE_FILE_SCHEMA, list_files, read_file, write_file
 from .http import COMPARE_SCHEMA, HTTP_REQUEST_SCHEMA, compare_responses, http_request
 from .parsing import (
@@ -150,6 +156,24 @@ def build_tool_registry() -> ToolRegistry:
         "List recent scan events such as worker output, agent messages and errors.",
         LIST_EVENTS_SCHEMA,
         list_events,
+        capabilities={CAPABILITY_READ},
+        timeout=30.0,
+    )
+    registry.register(
+        "create_callback",
+        "Create a callback address to watch. Put it in the request you are testing "
+        "and then call list_callbacks to see whether the target reached back.",
+        CREATE_CALLBACK_SCHEMA,
+        create_callback,
+        capabilities={CAPABILITY_NETWORK},
+        timeout=30.0,
+    )
+    registry.register(
+        "list_callbacks",
+        "List the callbacks this scan received. A callback is the target reaching "
+        "back: the evidence that a blind finding reproduces.",
+        LIST_CALLBACKS_SCHEMA,
+        list_callbacks,
         capabilities={CAPABILITY_READ},
         timeout=30.0,
     )

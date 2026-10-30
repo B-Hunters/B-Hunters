@@ -60,6 +60,8 @@ PLATFORM_COLLECTIONS = (
     "platform_api_tokens",
     "platform_notifications",
     "platform_notification_deliveries",
+    "platform_callback_tokens",
+    "platform_callbacks",
     "platform_findings",
     "platform_runner_heartbeats",
     "platform_assets",
@@ -230,6 +232,16 @@ INDEXES: dict[str, list[IndexSpec]] = {
     "platform_notification_deliveries": [
         IndexSpec([("delivery_id", ASCENDING)], "uniq_delivery_id", unique=True),
         IndexSpec([("notification_id", ASCENDING), ("at", DESCENDING)], "by_delivery_at"),
+    ],
+    "platform_callback_tokens": [
+        IndexSpec([("token_id", ASCENDING)], "uniq_callback_token_id", unique=True),
+        IndexSpec([("token", ASCENDING)], "uniq_callback_token", unique=True),
+        IndexSpec([("scan_id", ASCENDING)], "by_callback_scan"),
+    ],
+    "platform_callbacks": [
+        IndexSpec([("callback_id", ASCENDING)], "uniq_callback_id", unique=True),
+        IndexSpec([("token", ASCENDING), ("path", ASCENDING)], "by_callback_token_path"),
+        IndexSpec([("scan_id", ASCENDING), ("at", DESCENDING)], "by_callback_scan_at"),
     ],
     "platform_runner_heartbeats": [
         IndexSpec([("runner_id", ASCENDING)], "uniq_runner_id", unique=True),

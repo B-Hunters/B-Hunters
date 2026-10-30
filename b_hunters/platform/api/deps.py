@@ -10,6 +10,7 @@ from typing import Any, Optional
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from ..db.assets import WorkerRunRepository
+from ..db.callbacks import CallbackRepository
 from ..db.client import Database, get_database
 from ..db.comments import CommentRepository
 from ..db.identities import IdentityRepository
@@ -101,6 +102,8 @@ class Services:
         self.tokens = TokenRepository(self.db)
         #: The webhooks the platform posts to.
         self.notifications = NotificationRepository(self.db)
+        #: The out-of-band callback tokens and the hits they received.
+        self.callbacks = CallbackRepository(self.db)
         self.findings = FindingRepository(self.db, issues=self.issues)
         #: The encryption of the stored credentials.  ``None`` when the
         #: deployment has not configured a key yet.  It is built before

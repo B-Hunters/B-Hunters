@@ -157,6 +157,14 @@ class Settings:
     #: the role declares.
     agent_max_tool_calls_per_task: int = 0
     agent_workspace_root: str = "/var/lib/b-hunters/workspaces"
+    #: The address of the callback service, as the target sees it.
+    #:
+    #: It has to be an address the *target* can reach: a blind
+    #: vulnerability is confirmed by the target reaching back, so a
+    #: callback address that only the platform can reach confirms
+    #: nothing.  The service is exposed on its own port for that
+    #: reason.
+    callback_base_url: str = ""
     #: The share of the scan's duration the worker phase may use.  The
     #: agent roles get the rest: the workers are the slow part of a
     #: scan, and a request budget they have spent leaves the agents
@@ -322,6 +330,7 @@ def load_settings(
                 "agent_max_rounds",
                 "agent_max_tokens_per_scan",
                 "agent_judging_budget_share",
+                "callback_base_url",
                 "agent_max_roles",
                 "agent_max_task_budget",
                 "agent_wall_clock_seconds",
