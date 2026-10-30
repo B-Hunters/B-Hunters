@@ -33,6 +33,7 @@ WORKER_FIELDS = (
     ("Paths", "B-Hunters-dirsearch"),
     ("Paths403", "B-Hunters-dirsearch"),
     ("Screenshot", "B-Hunters-GoWitness"),
+    ("Vulns.ffuf", "B-Hunters-Ffuf"),
 )
 
 #: The workers that write into the ``links`` collection, and the field
@@ -40,7 +41,6 @@ WORKER_FIELDS = (
 LINK_WORKERS = (
     "B-Hunters-Katana",
     "B-Hunters-ParamSpider",
-    "B-Hunters-GoSpider",
 )
 
 #: The workers that write their result into the report's ``data`` document

@@ -41,13 +41,13 @@ WORKER_FIELDS: tuple[tuple[str, str], ...] = (
     ("Paths", "B-Hunters-dirsearch"),
     ("Paths403", "B-Hunters-dirsearch"),
     ("Screenshot", "B-Hunters-GoWitness"),
+    ("Vulns.ffuf", "B-Hunters-Ffuf"),
 )
 
 #: The workers that write into the ``links`` collection.
 LINK_WORKERS: tuple[str, ...] = (
     "B-Hunters-Katana",
     "B-Hunters-ParamSpider",
-    "B-Hunters-GoSpider",
 )
 
 #: The workers that write their result into the report's ``data`` document.
@@ -58,7 +58,7 @@ DATA_WORKERS: dict[str, str] = {
 #: Every worker of the platform, in the order the console shows them.
 WORKER_IDENTITIES: tuple[str, ...] = (
     "B-Hunters-DalFox",
-    "B-Hunters-GoSpider",
+    "B-Hunters-Ffuf",
     "B-Hunters-GoWitness",
     "B-Hunters-Katana",
     "B-Hunters-Nmap",

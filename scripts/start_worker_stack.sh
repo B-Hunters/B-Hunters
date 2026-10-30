@@ -8,7 +8,7 @@ set -u
 CONFIG=/home/sniper/pentest/dev/b-hunters.ini
 NETWORK=dev_default
 
-WORKERS="nmap dirsearch paramspider webtechnology wapiti nuclei sqlmap dalfox ssti katana gospider wayback xray jsscanner getjs gowitness subrecon"
+WORKERS="nmap dirsearch paramspider webtechnology wapiti nuclei sqlmap dalfox ssti katana ffuf wayback xray jsscanner getjs gowitness subrecon"
 
 for worker in $WORKERS; do
   image="b-hunters-local/$worker:1.2.0"

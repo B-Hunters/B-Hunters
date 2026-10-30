@@ -60,7 +60,7 @@ deployment playground, and 17 are individual scanner workers.
 | `B-Hunters-Dirsearch` | Directory brute force | Python | `B-Hunters-dirsearch` | `subdomain`/`new` |
 | `B-Hunters-ParamSpider` | Parameter discovery | Python | `B-Hunters-ParamSpider` | `subdomain`/`new` |
 | `B-Hunters-Wayback` | Historical URLs | Python/Go | `B-Hunters-wayback` | `subdomain`/`new` |
-| `B-Hunters-GoSpider` | Crawler | Python/Go | `B-Hunters-GoSpider` | `url`/`new`, `path`/`new`, `subdomain`/`new` |
+| `B-Hunters-Ffuf` | Fuzzer | Go | `B-Hunters-Ffuf` | `url`/`new`, `path`/`new` |
 | `B-Hunters-Katana` | Crawler | Python/Go | `B-Hunters-Katana` | `url`/`new`, `path`/`new`, `subdomain`/`new` |
 | `B-Hunters-GetJS` | JavaScript collection | Python/Go | `B-Hunters-getjs` | `url`/`new`, `path`/`new`, `subdomain`/`new` |
 | `B-Hunters-Web-Technology` | Technology fingerprinting | Python | `B-Hunters-web-technology` | `url`/`new`, `path`/`new`, `subdomain`/`new` |
@@ -143,8 +143,8 @@ All 17 workers inherit from `b_hunters.bhunter.BHunters`
 3. Nine modules consume `subdomain`/`new` and each writes into the
    `reports` document: `Ports`, `Technology`, `Paths`, `Paths403`,
    `Screenshot`, `Vulns.<tool>` and `data.<tool>`.
-4. `Dirsearch` emits `{"type": "path", "stage": "new"}`; `GoSpider`,
-   `Katana` and `ParamSpider` emit `{"type": "paths", "stage": "scan"}`
+4. `Dirsearch` emits `{"type": "path", "stage": "new"}`; `Katana`
+   and `ParamSpider` emit `{"type": "paths", "stage": "scan"}`
    and `{"type": "js", "stage": "new"}`.
 5. `Nuclei`, `SQLMap`, `DalFox` and `SSTI-Checker` consume `paths`/`scan`
    and append to `Vulns.<tool>`.
@@ -191,7 +191,7 @@ consequences matter:
 | `data` | 14 modules | many | no |
 | `subdomain` | 14 modules | Subrecon | no |
 | `source` | 13 modules | many | no |
-| `file` | jsscanner | GoSpider, Katana | no |
+| `file` | jsscanner | Katana | no |
 
 ### 1.6 Storage
 
@@ -228,7 +228,7 @@ was current when the image was built, not a pinned version.
 | Directory brute force | dirsearch | PyPI | No | `python:3.10-slim` | GPL-2.0 | maintained |
 | Parameter discovery | ParamSpider (bormaa fork) | git clone | No | `python:3.12-slim` | MIT | maintained |
 | Historical URLs | waybackurls, gau, waymore | `go install @latest`, pip VCS | No | `python:3.12-slim` | MIT | mixed |
-| Crawling | gospider, gf, qsreplace | `go install @latest` | No | `python:3.12-slim` | MIT | maintained |
+| Crawling | katana, gf, qsreplace | `go install @latest` | No | `python:3.12-slim` | MIT | maintained |
 | Crawling | katana | `go install @latest` | No | `python:3.12-slim` | MIT | maintained |
 | JS collection | getJS | `go install @latest` | No | `python:3.12-slim` | MIT | maintained |
 | Technology detection | wappalyzer-cli | pip VCS | No | `python:3.10-slim` | MIT | maintained |
@@ -258,7 +258,7 @@ B-Hunters-Nuclei   ──► b-hunters==1.1.13 (PyPI!)  + nuclei/httpx/uro
 B-Hunters-DalFox   ──► b-hunters==1.1.16 (PyPI!)  + dalfox/qsreplace/uro
 B-Hunters-Dirsearch──► b-hunters==1.1.13 (PyPI!)  + dirsearch
 B-Hunters-GetJS    ──► b-hunters==1.1.13 (PyPI!)  + getJS
-B-Hunters-GoSpider ──► b-hunters==1.1.13 (PyPI!)  + gospider/gf/qsreplace/uro
+B-Hunters-Ffuf     ──► b-hunters==1.3.0 (PyPI!)  + ffuf
 B-Hunters-gowitness──► b-hunters==1.1.13 (PyPI!)  + gowitness
 B-Hunters-jsscanner──► b-hunters==1.1.13 (PyPI!)  + SecretFinder/anew/nipejs
 B-Hunters-Katana   ──► b-hunters==1.1.13 (PyPI!)  + katana
@@ -393,7 +393,7 @@ executable checked into git, with no provenance record or checksum.
 
 ### 3.9 Orphaned task types
 
-*Evidence.* `GoSpider`, `Katana`, `ParamSpider` and `Wayback` each emit a
+*Evidence.* `Katana`, `ParamSpider` and `Wayback` each emit a
 task with `{"type": "file"}`. No module filters on `type=file`. The
 `jsscanner` module *reads* `task.payload["file"]` but filters on
 `{"type": "js", "stage": "new"}`. These `file` tasks are routed to a queue

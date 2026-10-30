@@ -4,6 +4,12 @@ This document covers the 17 scanner workers: how they talk to Karton, how
 they are built as containers, how their output is verified, and what was
 wrong with them.
 
+`gospider` was in the fleet until it was retired: the project has not
+been committed to since April 2024, and `katana` is its successor and is
+already here.  `ffuf` replaced it — it mutates a value in a request,
+which is what an object-level authorisation flaw needs, and the other
+tools only enumerate names and paths.
+
 ---
 
 ## 1. The message contract
@@ -17,8 +23,8 @@ to, and it reads a fixed set of payload keys.
 |---|---|---|---|
 | `domain` | `new` | the CLI producer | `subrecon` |
 | `subdomain` | `new` | `subrecon` | `nmap`, `dirsearch`, `paramspider`, `wayback`, `gowitness`, `wapiti`, `xray`, `sqlmap`, `nuclei`, `webtechnology` |
-| `url` | `new` | the crawlers | `getjs`, `gospider`, `katana`, `webtechnology` |
-| `path` | `new` | `dirsearch` | `getjs`, `gospider`, `katana`, `webtechnology` |
+| `url` | `new` | the crawlers | `getjs`, `katana`, `webtechnology` |
+| `path` | `new` | `dirsearch` | `getjs`, `katana`, `webtechnology` |
 | `paths` | `scan` | the crawlers | `nuclei`, `sqlmap`, `dalfox`, `ssti` |
 | `js` | `new` | the crawlers | `jsscanner` |
 
@@ -141,7 +147,7 @@ The verifier reads the worker sources and checks that:
 | The status referenced an undefined variable | `Web-Technology` | Use the subdomain; the worker raised a `NameError` on every task |
 | The scan ran twice | `Web-Technology` | Run it once |
 | The filters depended on an environment variable | `Nuclei` | Always bind to both filters and decide at run time |
-| A dead `type: file` key in the payload | `GoSpider`, `Katana`, `ParamSpider`, `Wayback` | Removed |
+| A dead `type: file` key in the payload | `Katana`, `ParamSpider`, `Wayback` | Removed |
 | The tool was called with a flag that no longer exists | `Web-Technology` | Use the tool's JSON output |
 
 ---
@@ -156,7 +162,7 @@ RUN pip install --no-cache-dir b-hunters==1.2.0
 ```
 
 ```bash
-for worker in nuclei katana dalfox sqlmap nmap gospider getjs jsscanner \
+for worker in nuclei katana dalfox sqlmap nmap ffuf getjs jsscanner \
               paramspider ssti subrecon wapiti wayback webtechnology xray dirsearch gowitness; do
   case "$worker" in
     nuclei)      dir=B-Hunters-Nuclei ;;
@@ -164,7 +170,7 @@ for worker in nuclei katana dalfox sqlmap nmap gospider getjs jsscanner \
     dalfox)      dir=B-Hunters-DalFox ;;
     sqlmap)      dir=B-Hunters-Sqlmap ;;
     nmap)        dir=B-Hunters-NMap ;;
-    gospider)    dir=B-Hunters-GoSpider ;;
+    ffuf)        dir=B-Hunters-Ffuf ;;
     getjs)       dir=B-Hunters-GetJS ;;
     jsscanner)   dir=B-Hunters-jsscanner ;;
     paramspider) dir=B-Hunters-ParamSpider ;;

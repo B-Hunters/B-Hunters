@@ -41,7 +41,7 @@ run measured, in the order of how much each closes.
 
 | Tool | Why |
 |---|---|
-| **gospider** | `jaeles-project/gospider` has not been committed to since April 2024. `katana` is its successor and is already in the fleet. Every reference is listed in §"The references" below |
+| **gospider** | `jaeles-project/gospider` has not been committed to since April 2024. `katana` is its successor and is already in the fleet. **Removed** from the fleet: the compose file, the scanner registry, the worker list, the dashboard, the verification script, the development stack and the documentation all name `ffuf` instead |
 | **waybackurls** | The wayback worker already runs `waymore`, which pulls from the Wayback Machine, CommonCrawl, urlscan.io and AlienVault OTX at once. The stale tool was retired from the worker |
 | **xray** | `chaitin/xray` was last pushed in October 2024 and it is a host-side scanner, not a web one. It does not close any of these gaps |
 
@@ -84,16 +84,18 @@ worker was added.
 
 ## The references to gospider
 
-Removing gospider from the fleet touches these places:
+Removing gospider from the fleet touched these places, and every one of
+them now names `ffuf` or the crawler that replaced it:
 
 * `docker-compose.platform.yml` — the service
 * `b_hunters/platform/scanners/registry.py` — the adapter and the spec
-* `b_hunters/platform/scanners/worker_output.py` — the worker that owns
-  the link field
-* `b_hunters/platform/agents/orchestrator.py` — the worker list
+* `b_hunters/platform/scanners/worker_output.py` — the worker list
+* `b_hunters/platform/agents/orchestrator.py` — the scanner list
 * `dashboard/workers.py` — the dashboard's worker list
 * `tools/verify_workers.py` — the verification script
 * `scripts/start_worker_stack.sh` — the development stack
-* `b_hunters/platform/bench/workers.py` — the path-list prefix
-* `docs/workers.md`, `docs/architecture-audit.md`,
-  `docs/implementation-report.md` — the documentation
+* `docs/workers.md`, `docs/architecture-audit.md` — the documentation
+
+The specifications and the plans under `docs/superpowers/` still name it:
+they are the record of what was decided at the time, and rewriting them
+would make them untrue.

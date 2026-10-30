@@ -157,17 +157,6 @@ def default_all_adapters() -> list[AdapterSpec]:
             upstream="https://github.com/B-Hunters/B-Hunters-Wayback",
         ),
         _karton_spec(
-            "gospider",
-            "1.1.16",
-            "Fast web spider producing links and JavaScript references.",
-            "B-Hunters-GoSpider",
-            "url",
-            "new",
-            [Capability.HTTP_CRAWL, Capability.JAVASCRIPT_COLLECTION],
-            ["url", "javascript"],
-            upstream="https://github.com/B-Hunters/B-Hunters-GoSpider",
-        ),
-        _karton_spec(
             "katana",
             "1.1.16",
             "Concurrent web crawler with JavaScript parsing.",

@@ -45,12 +45,8 @@ def test_a_comment_is_stored_on_its_issue(services):
 
 def test_the_comments_of_an_issue_are_listed_oldest_first(services):
     issue = _issue(services)
-    services.comments.add(
-        issue_id=issue["issue_id"], scan_id="", finding_id="", author="me", body="first"
-    )
-    services.comments.add(
-        issue_id=issue["issue_id"], scan_id="", finding_id="", author="me", body="second"
-    )
+    services.comments.add(issue_id=issue["issue_id"], scan_id="", finding_id="", author="me", body="first")
+    services.comments.add(issue_id=issue["issue_id"], scan_id="", finding_id="", author="me", body="second")
 
     comments = services.comments.list_for_issue(issue["issue_id"])
 
@@ -60,9 +56,7 @@ def test_the_comments_of_an_issue_are_listed_oldest_first(services):
 def test_a_comment_of_another_issue_is_not_listed(services):
     issue = _issue(services)
     other = _issue(services)
-    services.comments.add(
-        issue_id=issue["issue_id"], scan_id="", finding_id="", author="me", body="mine"
-    )
+    services.comments.add(issue_id=issue["issue_id"], scan_id="", finding_id="", author="me", body="mine")
 
     assert services.comments.list_for_issue(other["issue_id"]) == []
 
@@ -114,6 +108,4 @@ def test_an_empty_comment_is_refused(services):
     issue = _issue(services)
 
     with pytest.raises(ValueError):
-        services.comments.add(
-            issue_id=issue["issue_id"], scan_id="", finding_id="", author="me", body="   "
-        )
+        services.comments.add(issue_id=issue["issue_id"], scan_id="", finding_id="", author="me", body="   ")

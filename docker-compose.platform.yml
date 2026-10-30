@@ -435,9 +435,12 @@ services:
       bhunter:
         ipv4_address: 172.25.0.48
 
-  worker-gospider:
-    image: b-hunters-local/gospider:1.2.0
-    container_name: bhunter_worker_gospider
+  # The fuzzing engine.  It mutates a value in a request, which is what
+  # an object-level authorisation flaw needs: the other tools enumerate
+  # names and paths, this one changes what is asked for.
+  worker-ffuf:
+    image: b-hunters-local/ffuf:1.2.0
+    container_name: bhunter_worker_ffuf
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
