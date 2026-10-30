@@ -75,3 +75,36 @@ never leaves the process that needs it.
 
 The login is queued rather than run: the recorder needs the browser and
 the credentials, and the API does not decrypt. The runner does both.
+
+## The recorder
+
+The recorder runs in the runner, in a job of its own:
+
+```bash
+b-hunters admin ... # or the API:
+curl -X POST http://bhunter/api/v1/identities/<id>/login
+# 202 {"job_id": "..."}
+```
+
+It fills the target's login form, keeps the session and checks it
+against the identity's `verify_url` — a page that *requires* the
+session. A `success_url` that is also reachable without one proves
+nothing, so the check is made against the protected page.
+
+The session is stored encrypted on the identity and handed to the
+workers with the task they receive.
+
+## The browser is inside the scope
+
+The recorder drives a browser, and a browser can reach anything the
+page can. Two rules keep it honest:
+
+* every request the page makes — document, XHR, fetch, WebSocket — is
+  checked against the scan's `ScopePolicy` before it leaves, including
+  every redirect hop;
+* the service worker is blocked, because a service worker is a second
+  network stack inside the page that the request hook does not see.
+
+The check is the platform's own `ScopeEnforcer` — the same one every
+other request path uses. A browser that had its own idea of the scope
+would be a second answer to the same question.

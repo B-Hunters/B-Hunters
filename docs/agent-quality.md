@@ -64,3 +64,34 @@ per role and overall. The results are stored in `platform_benchmark_runs`
 with `mode="agent"`, beside the scanner runs, so the two can be
 compared: what the scanners found, what the agents found, and what each
 cost.
+
+## The order the roles start in, and the budget they keep
+
+A scan has a budget and the roles compete for it. When twelve roles are
+planned at once, the budget is gone before the last of them starts, and
+the ones that never ran are recorded as cut off — **including the roles
+that give the findings their verdict**. A scan whose adjudicator never
+ran leaves every finding unverified.
+
+Two changes fix that:
+
+* **The roles start in the order of their yield.** `recon` maps the
+  surface, then the client-side and the API roles work on it, then the
+  weakness roles. The order is `ROLE_PRIORITY` in the orchestrator.
+* **The judging roles keep a reserved share of the budget.** The
+  hypothesis roles stop short of the deadline by
+  `BHUNTERS_AGENT_JUDGING_BUDGET_SHARE` (30% by default), so that the
+  verifier and the adjudicator always have time to judge what was
+  found.
+
+A role that never started is recorded as `wall_clock`, never as one
+that found nothing.
+
+## The workers are bounded too
+
+The worker phase has a budget of its own — 70% of the scan — and a
+worker that spends it all starves the agents. Every worker is now
+bounded: a rate, a concurrency and a timeout. sqlmap was also pointed at
+the root of the target and asked for level 1 and risk 1, which is the
+shallowest setting it has; it now crawls, asks for more, and ignores
+the 401s of an application that answers them. See `docs/tooling.md`.
