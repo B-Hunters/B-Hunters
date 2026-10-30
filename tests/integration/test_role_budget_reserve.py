@@ -48,9 +48,7 @@ def test_the_judging_roles_keep_a_share_of_the_budget(services):
     orchestrator = ScanOrchestrator(database=services.db, settings=services.settings)
     deadline = time.monotonic() + 100
 
-    reserve = orchestrator._judging_reserve(
-        type("C", (), {"max_duration_seconds": 100})(), deadline
-    )
+    reserve = orchestrator._judging_reserve(type("C", (), {"max_duration_seconds": 100})(), deadline)
 
     assert reserve > 0
     assert reserve <= 100 * 0.5
