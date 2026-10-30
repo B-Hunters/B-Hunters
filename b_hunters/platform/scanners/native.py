@@ -140,6 +140,12 @@ async def security_headers_executor(request: ScanRequest) -> ScanResult:
                         "host": urlsplit(url).hostname or "",
                         "affected_url": url,
                         "evidence": [{"kind": "response_headers", "excerpt": f"{name} is absent"}],
+                        # The fingerprint of a finding is the class, the
+                        # host, the path and the parameter.  Without the
+                        # name of the header every missing header of a
+                        # target has the same fingerprint, and only the
+                        # first one is ever reported.
+                        "extra_key": f"header:{name}",
                     }
                 )
             elif not predicate(value):
@@ -153,6 +159,7 @@ async def security_headers_executor(request: ScanRequest) -> ScanResult:
                         "host": urlsplit(url).hostname or "",
                         "affected_url": url,
                         "evidence": [{"kind": "response_headers", "excerpt": f"{name}: {value}"}],
+                        "extra_key": f"header:{name}",
                     }
                 )
 
