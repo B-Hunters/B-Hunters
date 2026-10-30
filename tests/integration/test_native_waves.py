@@ -118,9 +118,12 @@ def test_the_crawler_is_registered_with_its_executor(database, settings) -> None
 
 def test_the_phase_shares_come_from_the_settings() -> None:
     """The worker phase takes the share the deployment configures."""
-    assert Settings().worker_phase_share == 0.7
+    # The share is even by default: the measurement gave the workers
+    # ten minutes and seven findings, and the agent roles three minutes
+    # each and the interesting ones.
+    assert Settings().worker_phase_share == 0.5
     assert load_settings(overrides={"worker_phase_share": 0.9}).worker_phase_share == 0.9
-    assert load_settings(overrides={"worker_phase_share": 0.9}).worker_phase_share != 0.7
+    assert load_settings(overrides={"worker_phase_share": 0.9}).worker_phase_share != 0.5
 
     from b_hunters.platform.agents import orchestrator as orchestrator_module
 
