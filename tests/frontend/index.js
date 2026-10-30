@@ -8,6 +8,7 @@
 import './api.test.js';
 import './components.test.js';
 import './escaping.test.js';
+import './findings-view.test.js';
 import './format.test.js';
 import './main.test.js';
 import './router.test.js';

@@ -53,7 +53,9 @@ PLATFORM_COLLECTIONS = (
     "platform_counters",
     "platform_jobs",
     "platform_target_locks",
+    "platform_identities",
     "platform_issues",
+    "platform_findings",
     "platform_runner_heartbeats",
     "platform_assets",
     "platform_worker_runs",
@@ -189,6 +191,10 @@ INDEXES: dict[str, list[IndexSpec]] = {
     "platform_target_locks": [
         IndexSpec([("target_key", ASCENDING)], "uniq_target_key", unique=True),
         IndexSpec([("expires_at", ASCENDING)], "ttl_expires", expire_after_seconds=0),
+    ],
+    "platform_identities": [
+        IndexSpec([("identity_id", ASCENDING)], "uniq_identity_id", unique=True),
+        IndexSpec([("name", ASCENDING)], "by_name"),
     ],
     "platform_issues": [
         IndexSpec(
