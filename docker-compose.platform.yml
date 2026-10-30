@@ -169,6 +169,10 @@ services:
       - BHUNTERS_AGENT_WALL_CLOCK_SECONDS=1800
       - BHUNTERS_AGENT_MAX_ROLES=${BHUNTERS_AGENT_MAX_ROLES:-4}
       - BHUNTERS_AGENT_JUDGING_BUDGET_SHARE=${BHUNTERS_AGENT_JUDGING_BUDGET_SHARE:-0.3}
+      # The workers and the agents each get half of the scan: the
+      # workers produced seven findings in ten minutes and the agent
+      # roles found the interesting ones in three.
+      - BHUNTERS_WORKER_PHASE_SHARE=${BHUNTERS_WORKER_PHASE_SHARE:-0.5}
     # The image's entry point is already `b-hunters`, so the command
     # names the subcommand only.
     command: ["runner"]

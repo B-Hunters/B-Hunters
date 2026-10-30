@@ -161,7 +161,14 @@ class Settings:
     #: agent roles get the rest: the workers are the slow part of a
     #: scan, and a request budget they have spent leaves the agents
     #: unable to reach the target they are supposed to reason about.
-    worker_phase_share: float = 0.7
+    #: The share of the scan's duration the worker phase may use.
+    #:
+    #: The measurement says the workers are not worth two thirds of a
+    #: scan: they produced seven findings in ten minutes on the
+    #: laboratory, and the agent roles found the interesting ones in
+    #: three minutes each.  The balance is even, and the roles that
+    #: judge keep a share of what is left.
+    worker_phase_share: float = 0.5
     #: Whether a scan runs the independent verifier by default.  The
     #: verifier re-checks every candidate finding, which costs a request
     #: each, and the adjudicator judges the findings anyway, so it is off
