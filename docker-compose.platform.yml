@@ -9,11 +9,13 @@
 #
 #   docker compose --env-file ../.env -f docker-compose.platform.yml up -d
 #
-# The scanner worker images are built separately:
+# The scanner worker images are built separately, against the shared
+# class in this repository rather than against the published release:
 #
-#   for w in nuclei katana dalfox sqlmap nmap; do
-#     docker build -q -t b-hunters-local/$w:1.2.0 ../repos/B-Hunters-${w^}
-#   done
+#   scripts/build_workers.sh
+#
+# A worker that calls `auth_headers(task)` against a release that does
+# not have it fails inside the scan, where it is hardest to see.
 
 x-tailscale: &tailscale
   image: tailscale/tailscale:latest
