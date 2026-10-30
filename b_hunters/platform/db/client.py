@@ -222,7 +222,7 @@ class Database:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self._client: Optional[MongoClient] = None
-        self._db: Optional[Database] = None
+        self._db: Optional[MongoDatabase] = None
         # Reentrant: the ``db`` property calls ``client`` while already
         # holding this lock, so a plain Lock would self-deadlock.
         self._lock = threading.RLock()

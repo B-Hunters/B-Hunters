@@ -250,8 +250,8 @@ def analyze_javascript(source: str, *, url: str = "") -> dict[str, Any]:
     parameters: set[str] = set()
     for key_match in _PARAM_KEY_RE.finditer(stripped):
         block = key_match.group(1)
-        for key in re.finditer(r"([A-Za-z_$][A-Za-z0-9_$]{0,40})\s*:", block):
-            parameters.add(key.group(1))
+        for key_match in re.finditer(r"([A-Za-z_$][A-Za-z0-9_$]{0,40})\s*:", block):
+            parameters.add(key_match.group(1))
     for match in _QUERY_PARAM_RE.finditer(stripped):
         parameters.add(match.group(1))
     for match in _URL_TEMPLATE_RE.finditer(stripped):

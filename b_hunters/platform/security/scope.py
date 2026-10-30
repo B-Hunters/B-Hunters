@@ -301,7 +301,7 @@ class ScopeEnforcer:
             infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
         except socket.gaierror:
             return []
-        return sorted({info[4][0] for info in infos})
+        return sorted({str(info[4][0]) for info in infos})
 
     def validate_ip(self, ip: str) -> tuple[bool, str]:
         if self.policy.allow_private_network:

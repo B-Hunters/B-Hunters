@@ -429,11 +429,11 @@ def verify_repository_set(
             consumed.setdefault(entry.get("type", ""), set()).add(contract.name)
         for task_type in contract.task_types:
             produced.setdefault(task_type, set()).add(contract.name)
-    for task_type, names in sorted(produced.items()):
+    for task_type, producers in sorted(produced.items()):
         if task_type and task_type not in consumed:
             findings.append(
                 ContractFinding(
-                    ", ".join(sorted(names)),
+                    ", ".join(sorted(producers)),
                     "error",
                     "orphaned-task-type",
                     f"the workers {sorted(names)} emit the task type '{task_type}', which no worker consumes",

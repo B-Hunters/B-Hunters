@@ -18,7 +18,6 @@ import hashlib
 import hmac
 import secrets
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -214,7 +213,7 @@ class LoginThrottle:
         self._locked_until.clear()
 
 
-def session_to_dict(session: Session) -> Mapping[str, Any]:
+def session_to_dict(session: Session) -> dict[str, Any]:
     """Storage representation of a session."""
     return {
         "session_id_hash": hash_session_id(session.session_id),

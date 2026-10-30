@@ -209,8 +209,9 @@ class BaseAdapter:
             return health
         started = time.monotonic()
         try:
-            if self._executor is not None and getattr(self, "probe", None) is not None:
-                detail = await self.probe()
+            probe = getattr(self, "probe", None)
+            if self._executor is not None and probe is not None:
+                detail = await probe()
                 status = HealthStatus.HEALTHY
             else:
                 detail = "adapter is registered and ready"

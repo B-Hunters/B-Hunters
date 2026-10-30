@@ -17,8 +17,17 @@ from karton.core import Config, Karton
 
 class BHunters(Karton):
     def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        # The configuration comes from the environment: the workers are
+        # containers and the file is mounted into them.  A positional
+        # argument would be Karton's own configuration, and ours wins,
+        # so it is refused rather than silently ignored.
+        if args:
+            raise TypeError(
+                "the worker base class takes its configuration from BHUNTERS_CONFIG"
+            )
         config = Config(path=os.environ.get("BHUNTERS_CONFIG", "/etc/b-hunters/b-hunters.ini"))
-        super().__init__(*args, config=config, **kwargs)
+        kwargs["config"] = config
+        super().__init__(**kwargs)
         self.db=self.monogocon()
 
     def update_task_status(self,url,status):

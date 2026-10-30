@@ -401,16 +401,16 @@ class AdapterRegistry:
     def names(self) -> list[str]:
         return sorted(self._adapters)
 
-    def list(self) -> list[BaseAdapter]:
+    def all_adapters(self) -> list[BaseAdapter]:
         return [self._adapters[name] for name in sorted(self._adapters)]
 
     def enabled(self) -> list[BaseAdapter]:
-        return [a for a in self.list() if a.spec.enabled]
+        return [a for a in self.all_adapters() if a.spec.enabled]
 
     async def health(self, *, include_disabled: bool = False) -> dict[str, Any]:
         """Check every adapter and return a health summary."""
-        results = []
-        for adapter in self.list():
+        results: list[dict[str, Any]] = []
+        for adapter in self.all_adapters():
             if not adapter.spec.enabled and not include_disabled:
                 results.append(
                     {

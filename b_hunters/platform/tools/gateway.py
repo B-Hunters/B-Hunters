@@ -446,7 +446,10 @@ class ToolGateway:
         except ToolError:
             raise
         except Exception as exc:
-            raise ToolError(f"tool '{definition.name}' failed: {exc}") from exc
+            # The type of the exception is part of the explanation: an
+            # exception with an empty message would otherwise become a
+            # failure the platform cannot name.
+            raise ToolError(f"tool '{definition.name}' failed: {type(exc).__name__}: {exc}") from exc
 
         if inspect.isawaitable(result):
             try:

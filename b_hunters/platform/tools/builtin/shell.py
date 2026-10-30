@@ -184,8 +184,9 @@ async def run_command(
     # what may be touched, and `http_request` is not the only way out.
     scope = getattr(context, "scope", None)
     policy = getattr(scope, "policy", None)
-    host_allowed = None
-    if policy is not None and getattr(policy, "authorized_hosts", ()):
+    host_allowed: Optional[Callable[[str], bool]] = None
+    authorized_hosts = getattr(policy, "authorized_hosts", None)
+    if policy is not None and authorized_hosts:
         host_allowed = policy.matches_host
 
     parts = check_command(

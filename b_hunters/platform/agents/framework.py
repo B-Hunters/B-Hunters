@@ -17,7 +17,7 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import Callable
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Optional, cast
 
 from pydantic import BaseModel, Field, ValidationError
 from pydantic_ai import RunContext
@@ -190,7 +190,7 @@ def build_tools(
     *,
     records: Optional[list[dict[str, Any]]] = None,
     max_identical_calls: int = 3,
-) -> list[Tool[Any, Any]]:
+) -> list[Tool[Any]]:
     """The gateway's tools as framework tools.
 
     Each tool becomes a function whose signature is generated from the
@@ -203,7 +203,7 @@ def build_tools(
     scope check, the audit trail and the per-call timeout are the ones
     the platform already has.
     """
-    tools: list[Tool[Any, Any]] = []
+    tools: list[Tool[Any]] = []
     for definition in definitions:
         # Only the tools the role may use are bridged.  A model that is
         # offered a tool it may not use does not learn from the refusal:
@@ -218,7 +218,7 @@ def _as_tool(
     gateway: Any = None,
     records: Optional[list[dict[str, Any]]] = None,
     max_identical_calls: int = 3,
-) -> Tool[Any, Any]:
+) -> Tool[Any]:
     """One gateway tool as a framework tool."""
     properties = (definition.parameters or {}).get("properties", {}) or {}
     required = set((definition.parameters or {}).get("required", []) or [])
@@ -235,7 +235,7 @@ def _as_tool(
             if value is not None or _accepts_null(properties.get(name, {}))
         }
         kwargs = supplied
-        tool_context: ToolContext = getattr(ctx, "deps", ctx)
+        tool_context: ToolContext = cast(ToolContext, getattr(ctx, "deps", ctx))
         call_id = str(getattr(ctx, "tool_call_id", "") or "")
         signature = f"{definition.name}:{json.dumps(kwargs, sort_keys=True, default=str)}"
         seen[signature] = seen.get(signature, 0) + 1
@@ -498,7 +498,8 @@ def _to_openai_messages(message: ModelMessage) -> list[dict[str, Any]]:
         if isinstance(part, SystemPromptPart):
             instructions = f"{instructions}\n\n{part.content}" if instructions else part.content
         elif isinstance(part, UserPromptPart):
-            texts.append(part.content)
+            content = part.content
+            texts.append(content if isinstance(content, str) else str(content))
         elif isinstance(part, ToolReturnPart):
             results.append(
                 {
@@ -542,5 +543,5 @@ class NudgeModel(OpenAIChatModel):
         if self._nudge is not None:
             text = self._nudge()
             if text:
-                messages = list(messages) + [ModelRequest.parts([ModelRequest.user_text_part(text)])]
+                messages = list(messages) + [ModelRequest(parts=[UserPromptPart(text)])]
         return await super().request(messages, model_settings, model_request_parameters)

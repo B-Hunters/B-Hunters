@@ -88,9 +88,12 @@ def count_items(value: Any) -> int:
         return 0
     if isinstance(value, str):
         return 1 if value.strip() else 0
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, (list, tuple)):
         if len(value) == 1 and isinstance(value[0], (list, tuple)):
             return count_items(value[0])
+        return len(value)
+    if isinstance(value, set):
+        # A set has no order and no index, so it can only be counted.
         return len(value)
     if isinstance(value, dict):
         return len(value)

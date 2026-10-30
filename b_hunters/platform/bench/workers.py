@@ -278,7 +278,7 @@ def security_header_findings(report: dict[str, Any]) -> list[dict[str, Any]]:
 
     ports = report.get("Ports") or []
     if isinstance(ports, list) and ports:
-        open_ports = []
+        open_ports: list[str] = []
         for entry in ports:
             if isinstance(entry, dict):
                 open_ports.extend(str(port) for port in entry.get("ports", []))
