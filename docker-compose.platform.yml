@@ -565,7 +565,11 @@ services:
     image: bkimminich/juice-shop:latest
     container_name: bhunter_lab_juice_shop
     profiles: ["juiceshop"]
-    restart: "no"
+    # A full seventeen-worker scan builds a search index in the
+    # application, and the Node process can die of it: the target then
+    # stays away and the rest of the scan has nothing to look at.  The
+    # lab comes back by itself.
+    restart: unless-stopped
     environment:
       # The Node.js heap has to be large enough for the search index the
       # application builds.  The index grows with the data the scanners
