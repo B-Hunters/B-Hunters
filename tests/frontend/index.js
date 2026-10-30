@@ -6,6 +6,7 @@
  * the tests of this directory.
  */
 import './api.test.js';
+import './changes-view.test.js';
 import './components.test.js';
 import './escaping.test.js';
 import './findings-view.test.js';

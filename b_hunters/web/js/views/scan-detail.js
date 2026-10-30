@@ -6,6 +6,7 @@ import { badge, escape, fmtTime } from '../format.js';
 import { navigate } from '../router.js';
 import { startStream } from '../stream.js';
 import { renderAssetsTab } from './assets.js';
+import { renderDiffTab } from './changes.js';
 import { openTranscript, renderParticipation, renderRoleTable } from './participation.js';
 
 /** The scan detail route. */
@@ -48,6 +49,7 @@ export async function scanDetailView(params) {
       <div class="tab" data-tab="tools">Tool calls</div>
       <div class="tab" data-tab="scanners">Scanners</div>
       <div class="tab" data-tab="services">Services</div>
+      <div class="tab" data-tab="changes">Changes</div>
       <div class="tab" data-tab="urls">URLs</div>
       <div class="tab" data-tab="js">JS</div>
       <div class="tab" data-tab="images">Images</div>
@@ -141,6 +143,10 @@ export async function renderScanTab(tab, scanId) {
       + renderScanners(data, output);
     const action = el('scan-these');
     if (action) action.addEventListener('click', () => scanTheseUrls(output));
+    return;
+  }
+  if (tab === 'changes') {
+    await renderDiffTab(scanId);
     return;
   }
   if (tab === 'urls' || tab === 'js' || tab === 'images') {
