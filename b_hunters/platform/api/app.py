@@ -28,6 +28,7 @@ from .routers import (
     findings,
     identities,
     inventory,
+    issues,
     karton,
     scans,
 )
@@ -84,6 +85,7 @@ def create_app(
     app.include_router(findings.router, prefix=prefix)
     app.include_router(karton.router, prefix=prefix)
     app.include_router(admin.router, prefix=prefix)
+    app.include_router(issues.router, prefix=prefix)
     app.include_router(dashboard.router, prefix=prefix)
     app.include_router(benchmarks.router, prefix=prefix)
 

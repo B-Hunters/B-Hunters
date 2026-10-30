@@ -11,6 +11,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 
 from ..db.assets import WorkerRunRepository
 from ..db.client import Database, get_database
+from ..db.comments import CommentRepository
 from ..db.identities import IdentityRepository
 from ..db.issues import IssueRepository
 from ..db.jobs import JobRepository, TargetLockRepository
@@ -79,6 +80,8 @@ class Services:
         self.tool_calls = ToolCallRepository(self.db)
         #: The durable issues the findings belong to.
         self.issues = IssueRepository(self.db)
+        #: What the operator said about the issues.
+        self.comments = CommentRepository(self.db)
         self.findings = FindingRepository(self.db, issues=self.issues)
         #: The encryption of the stored credentials.  ``None`` when the
         #: deployment has not configured a key yet.  It is built before
@@ -131,6 +134,20 @@ def strip_object_id(document: dict[str, Any] | None) -> dict[str, Any]:
     if not document:
         return {}
     return {key: value for key, value in document.items() if key != "_id"}
+
+
+def strip_object_ids(value: Any) -> Any:
+    """Return a copy of a document with every ``_id`` removed.
+
+    A nested document carries its own ``_id``, and the JSON encoder
+    cannot represent a BSON ``ObjectId``.  The top-level helper is not
+    enough for an answer that holds a list of documents.
+    """
+    if isinstance(value, dict):
+        return {key: strip_object_ids(item) for key, item in value.items() if key != "_id"}
+    if isinstance(value, list):
+        return [strip_object_ids(item) for item in value]
+    return value
 
 
 def set_services(services: Optional[Services]) -> None:

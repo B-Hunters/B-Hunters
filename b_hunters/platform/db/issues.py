@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, Optional
 
-from pymongo import DESCENDING
+from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import DuplicateKeyError
 
 from .client import Database
@@ -43,6 +43,14 @@ MANUAL_TRIAGE_STATUSES = ("fixed", "risk_accepted", "false_positive")
 #: The states an observation can be in.
 OBSERVATION_STATUSES = ("observed", "not_observed", "auto_closed")
 
+#: The states an issue reopens from when it is seen again.
+#:
+#: ``fixed`` is here because a fix that did not hold is not a fix, and
+#: ``auto_closed`` because the platform closed it, not the operator.
+#: The states a person decided on — ``risk_accepted`` and
+#: ``false_positive`` — are left alone: the operator said what it is.
+REOPENABLE_STATUSES = ("fixed", "auto_closed")
+
 
 class IssueRepository:
     """The durable issues and their triage state."""
@@ -57,6 +65,41 @@ class IssueRepository:
     @property
     def _scans(self):
         return self._db.collection("platform_scans")
+
+    @property
+    def _events(self):
+        return self._db.collection("platform_issue_events")
+
+    def _record_event(
+        self,
+        issue_id: str,
+        *,
+        event: str,
+        before: str = "",
+        after: str = "",
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a change of state of an issue.
+
+        A state that changes silently is a state nobody can trust: the
+        operator has to be able to see that an issue they marked fixed
+        was seen again, and when.
+        """
+        self._events.insert_one(
+            {
+                "event_id": new_id(),
+                "issue_id": issue_id,
+                "event": event,
+                "from": before,
+                "to": after,
+                "detail": detail or {},
+                "at": utcnow(),
+            }
+        )
+
+    def events_for(self, issue_id: str) -> list[dict[str, Any]]:
+        """The events of an issue, oldest first."""
+        return list(self._events.find({"issue_id": issue_id}).sort("at", ASCENDING))
 
     # ------------------------------------------------------------------
     # The issue itself
@@ -148,19 +191,36 @@ class IssueRepository:
         assignee: str = "",
         tags: Sequence[str] = (),
         due_at: float | None = None,
+        duplicate_of: str = "",
+        note: str = "",
     ) -> bool:
-        """Set the triage state of an issue."""
+        """Set the triage state of an issue.
+
+        The change is recorded: the history of an issue is how the
+        operator knows what happened to it between two scans.
+        """
         if status not in TRIAGE_STATUSES:
             raise ValueError(f"invalid triage status '{status}'")
+        before = self._col.find_one({"issue_id": issue_id})
+        if before is None:
+            raise KeyError(issue_id)
         payload: dict[str, Any] = {
             "triage_status": status,
             "assignee": assignee,
             "tags": list(tags),
             "due_at": due_at,
+            "duplicate_of": duplicate_of,
             "updated_at": utcnow(),
         }
-        result = self._col.update_one({"issue_id": issue_id}, {"$set": payload})
-        return result.matched_count > 0
+        self._col.update_one({"issue_id": issue_id}, {"$set": payload})
+        self._record_event(
+            issue_id,
+            event="triaged",
+            before=str(before.get("triage_status", "")),
+            after=status,
+            detail={"assignee": assignee, "note": note, "duplicate_of": duplicate_of},
+        )
+        return True
 
     def history(self, issue_id: str) -> list[dict[str, Any]]:
         """The scans that saw the issue, with the state of each scan."""
@@ -229,18 +289,30 @@ class IssueRepository:
         for document in self._col.find({"target_key": target_key}):
             issue_id = document.get("issue_id", "")
             if str(document.get("fingerprint", "")) in observed:
-                self._col.update_one(
-                    {"issue_id": issue_id},
-                    {
-                        "$set": {
-                            "observation_status": "observed",
-                            "consecutive_misses": 0,
-                            "last_seen_at": now,
-                            "last_seen_scan_id": scan_id,
-                            "updated_at": now,
-                        }
-                    },
-                )
+                before = str(document.get("triage_status", "open"))
+                seen: dict[str, Any] = {
+                    "observation_status": "observed",
+                    "consecutive_misses": 0,
+                    "last_seen_at": now,
+                    "last_seen_scan_id": scan_id,
+                    "updated_at": now,
+                }
+                # A problem that is seen again is open again.  An issue
+                # the operator marked fixed and an issue the platform
+                # closed by itself both reopen — the difference is that
+                # the operator's decision is kept in the history, so
+                # they can see that their fix did not hold.
+                if before in REOPENABLE_STATUSES:
+                    seen["triage_status"] = "open"
+                self._col.update_one({"issue_id": issue_id}, {"$set": seen})
+                if before in REOPENABLE_STATUSES:
+                    self._record_event(
+                        issue_id,
+                        event="reopened",
+                        before=before,
+                        after="open",
+                        detail={"scan_id": scan_id},
+                    )
                 counts["observed"] += 1
                 continue
             misses = int(document.get("consecutive_misses", 0)) + 1

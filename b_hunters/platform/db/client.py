@@ -55,6 +55,8 @@ PLATFORM_COLLECTIONS = (
     "platform_target_locks",
     "platform_identities",
     "platform_issues",
+    "platform_issue_events",
+    "platform_issue_comments",
     "platform_findings",
     "platform_runner_heartbeats",
     "platform_assets",
@@ -204,6 +206,14 @@ INDEXES: dict[str, list[IndexSpec]] = {
         ),
         IndexSpec([("triage_status", ASCENDING), ("severity", ASCENDING)], "by_triage_severity"),
         IndexSpec([("last_seen_at", DESCENDING)], "by_last_seen"),
+    ],
+    "platform_issue_events": [
+        IndexSpec([("event_id", ASCENDING)], "uniq_issue_event_id", unique=True),
+        IndexSpec([("issue_id", ASCENDING), ("at", ASCENDING)], "by_issue_at"),
+    ],
+    "platform_issue_comments": [
+        IndexSpec([("comment_id", ASCENDING)], "uniq_issue_comment_id", unique=True),
+        IndexSpec([("issue_id", ASCENDING), ("created_at", ASCENDING)], "by_issue_created"),
     ],
     "platform_runner_heartbeats": [
         IndexSpec([("runner_id", ASCENDING)], "uniq_runner_id", unique=True),
