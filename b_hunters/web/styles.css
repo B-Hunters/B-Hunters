@@ -328,6 +328,16 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .badge.failed, .badge.err, .badge.crashed, .badge.cancelled, .badge.stopping, .badge.rejected { background: rgba(255,92,114,.13); color: #ff8d9d; border-color: rgba(255,92,114,.3); }
 .badge.running { animation: pulse 1.9s ease-in-out infinite; }
 .badge.draft, .badge.idle, .badge.unverified, .badge.inconclusive, .badge.blocked { background: rgba(139,152,168,.13); color: #a3b1c1; border-color: rgba(139,152,168,.26); }
+.badge.danger { background: rgba(255,92,114,.14); color: #ff8d9d; border-color: rgba(255,92,114,.32); }
+.badge.warn { background: rgba(245,196,81,.14); color: #f5c451; border-color: rgba(245,196,81,.3); }
+.badge.muted { background: rgba(139,152,168,.13); color: #a3b1c1; border-color: rgba(139,152,168,.26); }
+
+/* A comment on an issue. */
+.comment {
+  border-left: 2px solid var(--border);
+  padding: 6px 0 6px 10px;
+  margin-bottom: 10px;
+}
 
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
 

@@ -20,6 +20,7 @@ import { kartonView } from './views/karton.js';
 import { newScanView } from './views/new-scan.js';
 import { scanDetailView } from './views/scan-detail.js';
 import { scansView } from './views/scans.js';
+import { issuesView } from './views/issues.js';
 
 /* --------------------------------------------------------------- routes */
 registerRoute('dashboard', dashboardView);
@@ -27,6 +28,7 @@ registerRoute('scans', scansView);
 registerRoute('new-scan', newScanView);
 registerRoute('scans/:id', scanDetailView);
 registerRoute('findings', findingsView);
+registerRoute('issues', issuesView);
 registerRoute('agents', agentsView);
 registerRoute('karton', kartonView);
 registerRoute('benchmarks', benchmarksView);
