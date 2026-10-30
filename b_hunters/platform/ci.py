@@ -150,6 +150,9 @@ def ci_scan(
             f"({row.get('vuln_class', '')})"
         )
 
+    if not fail_on:
+        log(f"{len(rows)} finding(s); no threshold was set, so the scan passes")
+        return 0
     bad = [row for row in rows if at_least(str(row.get("severity", "")), fail_on)]
     if bad:
         log(f"{len(bad)} finding(s) at or above '{fail_on}'")
