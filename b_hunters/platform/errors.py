@@ -31,6 +31,7 @@ ERROR_CLASSES = (
     "permission",
     "unknown_tool",
     "budget",
+    "arguments",
     "crash",
     "unexplained",
 )
@@ -68,6 +69,11 @@ _PERMISSION = re.compile(
 )
 _UNKNOWN_TOOL = re.compile(r"unknown tool|no such tool|tool .* not found", re.IGNORECASE)
 _BUDGET = re.compile(r"budget|exhausted|ran out of", re.IGNORECASE)
+_ARGUMENTS = re.compile(
+    r"invalid arguments|arguments .* (?:is|are) not of type|"
+    r"does not match the schema|validation error",
+    re.IGNORECASE,
+)
 _TRACEBACK = re.compile(
     r"traceback \(most recent call last\)|^\s+File \"",
     re.IGNORECASE | re.MULTILINE,
@@ -132,6 +138,10 @@ def classify_error(text: str, status: str = "") -> str:
         return "permission"
     if _BUDGET.search(message):
         return "budget"
+    if _ARGUMENTS.search(message):
+        # The tool said what was wrong with the arguments.  The model
+        # sent the wrong shape; the platform can name it.
+        return "arguments"
 
     return "unexplained"
 

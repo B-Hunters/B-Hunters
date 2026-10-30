@@ -68,6 +68,17 @@ def test_an_unexplained_failure_fails_the_verdict():
     assert verdict["crash"] == 1
 
 
+def test_a_validation_failure_is_an_explained_failure():
+    # The tool said what was wrong with the arguments.
+    assert (
+        classify_error(
+            "invalid arguments for 'http_request': headers/Content-Type: "
+            "{'application/json': ''} is not of type 'string'"
+        )
+        == "arguments"
+    )
+
+
 def test_an_empty_failure_is_unexplained():
     ledger = ErrorLedger()
     ledger.add("tool_call", "")
