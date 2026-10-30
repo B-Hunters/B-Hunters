@@ -742,3 +742,78 @@ def _health(workers: list[dict[str, Any]]) -> dict[str, Any]:
         # platform expects of them.
         "version_label": "expected",
     }
+
+
+@router.get("/{scan_id}/diff")
+async def scan_diff(
+    scan_id: str,
+    against: str = "",
+    user: CurrentUser = Depends(current_user),
+    services: Services = Depends(get_services),
+) -> dict[str, Any]:
+    """Compare a scan with an earlier one.
+
+    The earlier scan is the one given by ``against``; without it, the
+    last completed scan of the same target that asked the same question
+    is used.  Two scans that did not ask the same question are not
+    comparable, and the diff says so rather than claiming a difference
+    that is not there.
+    """
+    from ...diffing import compare, comparison_key, is_comparable
+
+    repository = services.issues
+    current = services.scans.get(scan_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="the scan does not exist")
+
+    baseline = None
+    if against:
+        baseline = services.scans.get(against)
+        if baseline is None:
+            raise HTTPException(status_code=404, detail="the scan to compare with does not exist")
+    else:
+        for candidate in services.scans.list(limit=200):
+            if candidate.scan_id == scan_id:
+                continue
+            if candidate.status != "completed":
+                continue
+            if comparison_key(_as_dict(candidate)) != comparison_key(_as_dict(current)):
+                continue
+            baseline = candidate
+            break
+
+    comparable, reason = is_comparable(_as_dict(current), _as_dict(baseline) if baseline else None)
+    current_issues = repository.list(target_key=_target_key(current))
+    baseline_issues = repository.list(target_key=_target_key(baseline)) if baseline else []
+
+    result = compare(
+        current=_as_dict(current),
+        baseline=_as_dict(baseline) if baseline else None,
+        issues_current=current_issues,
+        issues_baseline=baseline_issues,
+        comparable=comparable,
+        reason=reason,
+    )
+    result["scan_id"] = scan_id
+    result["against"] = baseline.scan_id if baseline else ""
+    return result
+
+
+def _as_dict(record: Any) -> dict[str, Any]:
+    """A scan record as a mapping."""
+    if record is None:
+        return {}
+    if isinstance(record, dict):
+        return record
+    return {
+        "scan_id": getattr(record, "scan_id", ""),
+        "status": getattr(record, "status", ""),
+        "phase": getattr(record, "phase", ""),
+        "definition": getattr(record, "definition", {}) or {},
+        "scope": getattr(record, "scope", {}) or {},
+    }
+
+
+def _target_key(record: Any) -> str:
+    """The target key of a scan."""
+    return str(getattr(record, "target_key", "") or "")

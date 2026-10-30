@@ -183,6 +183,7 @@ class IssueRepository:
     def list(
         self,
         *,
+        target_key: str = "",
         triage_status: str = "",
         severity: str = "",
         limit: int = 100,
@@ -190,6 +191,8 @@ class IssueRepository:
     ) -> list[dict[str, Any]]:
         """List the issues, the most recently seen first."""
         query: dict[str, Any] = {}
+        if target_key:
+            query["target_key"] = target_key
         if triage_status:
             query["triage_status"] = triage_status
         if severity:
