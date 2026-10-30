@@ -103,5 +103,21 @@ def test_the_aliases_of_a_class_are_the_canonical_ones():
     assert "information_disclosure" in aliases
 
 
+def test_a_candidate_is_a_note_and_not_a_finding():
+    """The agent roles report what they suspect as well as what they proved."""
+    assert normalise_vuln_class("client_side_injection_candidate") == "note"
+    assert normalise_vuln_class("candidate_access_control_target") == "note"
+    assert normalise_vuln_class("injection_candidate") == "note"
+
+
+def test_an_assessment_that_was_blocked_is_a_coverage_gap():
+    assert normalise_vuln_class("access_control_assessment_inconclusive") == "coverage_gap"
+    assert normalise_vuln_class("Assessment blocked: the host refused the request") == "coverage_gap"
+
+
+def test_a_note_about_the_target_is_a_note():
+    assert normalise_vuln_class("context") == "note"
+
+
 def test_an_unknown_class_keeps_its_text():
     assert normalise_vuln_class("Something Nobody Classified") == "something_nobody_classified"

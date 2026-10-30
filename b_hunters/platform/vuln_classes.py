@@ -74,6 +74,8 @@ _NOTE_CLASSES = {
     "configuration_intelligence": "technology",
     "untrusted_content": "untrusted_content",
     "informational": "informational",
+    # What the target is, rather than what is wrong with it.
+    "context": "note",
 }
 
 #: Words that name a class of their own, even though they are not
@@ -201,6 +203,25 @@ _KEYWORDS = (
     ("open redirect", "open_redirect"),
 )
 
+#: The words that mean the class names a hypothesis.
+_CANDIDATE_MARKERS = (
+    "candidate",
+    "suspected",
+    "possible",
+    "potential_",
+    "injection_candidate",
+    "access_control_candidate",
+)
+
+#: The words that mean the assessment itself was blocked.
+_BLOCKED_MARKERS = (
+    "inconclusive",
+    "assessment blocked",
+    "assessment could not",
+    "could not be assessed",
+    "was blocked",
+)
+
 _CWE = re.compile(r"cwe[-_ ]?(\d{1,4})", re.IGNORECASE)
 _TOKEN = re.compile(r"[a-z0-9_]+")
 
@@ -249,6 +270,19 @@ def normalise_vuln_class(raw: str) -> str:
     for phrase, canonical in _NOTE_CLASSES.items():
         if phrase in lowered:
             return canonical
+
+    # 3a. A class that names a candidate is a hypothesis, not a
+    # finding.  The agent roles report what they suspect as well as
+    # what they proved, and the two must not land in the same group.
+    for marker in _CANDIDATE_MARKERS:
+        if marker in lowered:
+            return "note"
+
+    # 3b. An assessment that could not be carried out is a gap in the
+    # coverage, not a vulnerability.
+    for marker in _BLOCKED_MARKERS:
+        if marker in lowered:
+            return "coverage_gap"
 
     # 4. A CWE in the text.  It comes before the phrases: a class that
     # names a CWE is that weakness, whatever it goes on to mention.
