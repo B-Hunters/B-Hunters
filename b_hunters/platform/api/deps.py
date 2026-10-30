@@ -11,6 +11,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 
 from ..db.assets import WorkerRunRepository
 from ..db.client import Database, get_database
+from ..db.identities import IdentityRepository
 from ..db.issues import IssueRepository
 from ..db.jobs import JobRepository, TargetLockRepository
 from ..db.repositories import (
@@ -93,6 +94,9 @@ class Services:
         self.worker_runs = WorkerRunRepository(self.db)
         #: The durable queue the runner takes its jobs from.
         self.jobs = JobRepository(self.db)
+        #: The identities the platform logs in with.  The secrets are
+        #: encrypted with the deployment key; the API never decrypts.
+        self.identities = IdentityRepository(self.db, secret_box=self.secret_box)
         #: One scan per target at a time.
         self.locks = TargetLockRepository(self.db)
 

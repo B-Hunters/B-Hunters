@@ -19,7 +19,18 @@ from fastapi.staticfiles import StaticFiles
 
 from ..settings import Settings, get_settings
 from .deps import Services, get_services, set_services
-from .routers import admin, assets, auth, benchmarks, dashboard, findings, inventory, karton, scans
+from .routers import (
+    admin,
+    assets,
+    auth,
+    benchmarks,
+    dashboard,
+    findings,
+    identities,
+    inventory,
+    karton,
+    scans,
+)
 
 log = logging.getLogger(__name__)
 
@@ -69,6 +80,7 @@ def create_app(
     app.include_router(scans.router, prefix=prefix)
     app.include_router(assets.router, prefix=prefix)
     app.include_router(inventory.router, prefix=prefix)
+    app.include_router(identities.router, prefix=prefix)
     app.include_router(findings.router, prefix=prefix)
     app.include_router(karton.router, prefix=prefix)
     app.include_router(admin.router, prefix=prefix)

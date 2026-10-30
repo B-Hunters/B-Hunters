@@ -150,6 +150,9 @@ class WorkerTarget:
     #: analysis of every target of a scan, so that the crashed tasks can
     #: be counted when the scan asks for them.
     platform_scan_id: str = ""
+    #: The session of the identity the scan names: the cookies and the
+    #: headers the workers pass to their tools.
+    auth: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

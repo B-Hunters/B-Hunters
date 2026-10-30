@@ -50,6 +50,7 @@ from ..scanners.karton_bridge import (
 )
 from ..scanners.registry import AdapterRegistry
 from ..security.scope import ScopeEnforcer, ScopePolicy, build_policy_from_scan
+from ..security.secrets import SecretBox
 from ..settings import Settings, get_settings
 from ..tools.gateway import ToolContext, ToolGateway, ToolPermissions, ToolRegistry
 from .collaboration import CollaborationState
@@ -444,6 +445,9 @@ class ScanOrchestrator:
     ) -> None:
         self.settings = settings or get_settings()
         self.db = database
+        #: The key that decrypts the stored credentials.  The API never
+        #: decrypts; the runner does, when a scan names an identity.
+        self._secret_box = SecretBox.from_settings(self.settings)
         self.scans = ScanRepository(database)
         self.events = EventRepository(database)
         self.tasks = TaskRepository(database)
@@ -1076,6 +1080,7 @@ class ScanOrchestrator:
         # this scan are what tell the console which workers took part in
         # *this* scan while it is still running.
         self.scans.update(context.scan_id, {"workers_before": before})
+        auth_payload = self._auth_payload(context)
         prepared = []
         for url in targets:
             if self._is_cancelled(context.scan_id):
@@ -1085,6 +1090,11 @@ class ScanOrchestrator:
                 description=context.name,
                 platform_scan_id=context.scan_id,
             )
+            # The session of the identity the scan names travels with
+            # the task, so that the workers scan the authenticated
+            # surface.  It is never written into the report.
+            if auth_payload:
+                target.auth = dict(auth_payload)
             try:
                 root_uid = self.worker_bridge.dispatch(target)
             except Exception as exc:
@@ -1148,6 +1158,28 @@ class ScanOrchestrator:
                     )
         saved = self.worker_output.replace_for_scan(context.scan_id, rows)
         log.info("saved %s item(s) of worker output for %s", saved, context.scan_id)
+
+    def _auth_payload(self, context: ScanContext) -> dict[str, Any]:
+        """The session the scan's identity gives the workers.
+
+        The scan names an identity by its identifier.  The identity
+        holds the session encrypted and only the runner decrypts it, so
+        the payload is built here and never stored.
+        """
+        identity_id = str((context.options or {}).get("identity_id", "") or "")
+        if not identity_id:
+            return {}
+        try:
+            from ..db.identities import IdentityRepository
+
+            repository = IdentityRepository(self.db, secret_box=self._secret_box)
+            payload = repository.auth_payload(identity_id)
+            if payload:
+                repository.touch(identity_id)
+            return payload
+        except Exception:
+            log.warning("could not read the session of the identity %s", identity_id)
+            return {}
 
     def _merge_assets(self, context: ScanContext, primary_target: str) -> dict[str, int]:
         """Fold what was found into the asset inventory.
