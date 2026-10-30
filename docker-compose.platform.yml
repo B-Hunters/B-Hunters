@@ -139,10 +139,12 @@ services:
     restart: unless-stopped
     depends_on:
       - mongo
-    command: ["b-hunters", "callbacks"]
+    # The image's entry point is already `b-hunters`, so the command
+    # names the subcommand only.
+    command: ["callbacks", "--host", "0.0.0.0", "--port", "8091"]
     environment:
       - BHUNTERS_HOST=0.0.0.0
-      - BHUNTERS_PORT=8081
+      - BHUNTERS_PORT=8091
       - BHUNTERS_MONGO_URI=mongodb://bhunter:bhunter_dev_pw@mongo:27017/?authSource=admin
       - BHUNTERS_MONGO_DB=b-hunters
       # The address the *target* reaches, not the address the platform
@@ -154,9 +156,9 @@ services:
     ports:
       # The port the target reaches.  It is the only exposed port of the
       # platform, and it serves one path.
-      - "${BHUNTERS_CALLBACK_PORT:-8081}:8081"
+      - "${BHUNTERS_CALLBACK_PORT:-8091}:8091"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8081/readyz || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8091/readyz || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
