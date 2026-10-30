@@ -211,6 +211,58 @@ the adjudicator's judgement that a transport header is meaningless on a
 service that has no TLS at all, which the medium-severity finding on the
 same target already says.
 
+## 5c. The run with the new fleet
+
+The last run was made with the fleet after the change: `ffuf` in place
+of `gospider`, every worker image rebuilt against the shared class of
+the platform repository, and the callback service running beside them.
+
+| | |
+|---|---|
+| Scan | `fd905536-a57a-4112-9bc1-ae9ca2d3bda0` |
+| Target | OWASP Juice Shop at `http://172.25.0.13:3000/` |
+| Duration | 1842.62 s |
+| Roles that completed | **12 of 12** |
+| Workers that took part | **17 of 17** |
+| Findings | 15, every one with a verdict |
+
+| Role | Rounds | Tokens |
+|---|---|---|
+| `recon` | 5 | 45,872 |
+| `javascript` | 7 | 70,896 |
+| `api` | 7 | 124,708 |
+| `authn` | 9 | 94,169 |
+| `access_control` | 7 | 90,773 |
+| `vuln_injection` | 7 | 122,546 |
+| `vuln_xss` | 5 | 56,792 |
+| `vuln_ssrf` | 5 | 53,280 |
+| `vuln_config` | 5 | 55,465 |
+| `source_analysis` | 8 | 112,744 |
+| `verifier` | 12 | 263,194 |
+| `adjudicator` | 11 | 190,381 |
+
+The participation table lists every worker of the fleet, each with the
+reason it took part or did not:
+
+```
+B-Hunters-Ffuf        ran, found nothing
+B-Hunters-Nuclei      ran
+B-Hunters-wapiti      ran
+...
+B-Hunters-Platform    never dispatched
+```
+
+`ffuf` took part and found nothing: the laboratory's search endpoint
+does not answer differently to a changed identifier, which is what the
+tool asks. That is an honest result, not a failure — the tool ran, and
+there was nothing there.
+
+The findings came back with their verdicts — five confirmed, five
+likely, four rejected, one unverified — and the classes were the
+platform's own: `security_misconfiguration`, `information_disclosure`,
+`xss`, `active_vulnerability`, and `note` for what the roles suspected
+rather than proved.
+
 ## 6. What the runs found in the platform
 
 Seven defects that only a live run could show:
