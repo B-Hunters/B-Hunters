@@ -162,6 +162,55 @@ right: *"Technologies identified"* is an observation rather than a
 vulnerability, and Wapiti's CSP finding says the same thing as the
 platform's own header adapter — the same defect, counted twice.
 
+## 5b. The run in which every role ran
+
+The last scan of the laboratory is the first in which **every** role ran
+and every finding carried a verdict.
+
+| | |
+|---|---|
+| Scan | `7176af38-c45d-47c1-915c-e85e74a32b08` |
+| Target | OWASP Juice Shop at `http://172.25.0.13:3000/` |
+| Budget | thirty minutes |
+| Duration | 1394.68 s |
+| Roles that completed | **12 of 12** |
+| Findings | 9, every one with a verdict |
+
+| Role | Rounds | Tokens |
+|---|---|---|
+| `recon` | 6 | 139,223 |
+| `javascript` | 8 | 240,214 |
+| `api` | 7 | 242,125 |
+| `authn` | 9 | 176,544 |
+| `access_control` | 7 | 169,760 |
+| `vuln_injection` | 7 | 147,000 |
+| `vuln_xss` | 5 | 113,257 |
+| `vuln_ssrf` | 5 | 110,886 |
+| `vuln_config` | 5 | 68,130 |
+| `source_analysis` | 7 | 131,740 |
+| `verifier` | 9 | 225,049 |
+| `adjudicator` | 11 | 233,296 |
+
+The findings came back with their verdicts:
+
+| Severity | Verdict | Finding | Raised by |
+|---|---|---|---|
+| low | confirmed | Missing content-security-policy header | `security_headers` |
+| info | **rejected** | Missing strict-transport-security header | `security_headers` |
+| info | **rejected** | Technologies identified | `technology` |
+| info | confirmed | Missing permissions-policy header | `security_headers` |
+| medium | confirmed | No HTTPS redirection | `Wapiti` |
+| info | confirmed | Missing referrer-policy header | `security_headers` |
+| info | **rejected** | CSP is not set | `Wapiti` |
+
+Three of the seven were rejected. Two of the rejections are right: *"Technologies
+identified"* is an observation rather than a vulnerability, and Wapiti's
+CSP finding says the same thing as the platform's own header adapter —
+the same defect, counted twice. The third, the missing HSTS header, is
+the adjudicator's judgement that a transport header is meaningless on a
+service that has no TLS at all, which the medium-severity finding on the
+same target already says.
+
 ## 6. What the runs found in the platform
 
 Seven defects that only a live run could show:
