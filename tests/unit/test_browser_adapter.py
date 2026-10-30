@@ -26,10 +26,7 @@ def test_a_link_is_made_absolute():
 
 def test_a_hash_route_keeps_the_page_it_is_on():
     """A hash route is a link whose fragment is the route."""
-    assert (
-        _absolute("https://demo.test/app/", "#/basket")
-        == "https://demo.test/app/#/basket"
-    )
+    assert _absolute("https://demo.test/app/", "#/basket") == "https://demo.test/app/#/basket"
 
 
 def test_a_reference_that_is_not_a_url_is_dropped():
