@@ -53,6 +53,7 @@ WORKER_REPOS=(
   "nuclei:B-Hunters-Nuclei"
   "paramspider:B-Hunters-ParamSpider"
   "sqlmap:B-Hunters-Sqlmap"
+  "ssti:b-hunters-SSTI-Checker"
   "subrecon:B-Hunters-Subrecon"
   "wapiti:B-Hunters-Wapiti"
   "wayback:B-Hunters-Wayback"
