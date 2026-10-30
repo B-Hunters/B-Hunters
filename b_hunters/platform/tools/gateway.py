@@ -138,6 +138,8 @@ class ToolContext:
     scope: Any = None  # ScopeEnforcer
     #: Evidence already gathered, keyed by a short handle.
     evidence: dict[str, Any] = field(default_factory=dict)
+    #: The artifacts the tools produced, by the same short handles.
+    artifacts: list[str] = field(default_factory=list)
     #: The set of tools the agent was offered.
     allowed_tools: set[str] = field(default_factory=set)
     metadata: dict[str, Any] = field(default_factory=dict)

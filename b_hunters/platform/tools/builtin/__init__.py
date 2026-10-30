@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ...browser.tool import BROWSER_TOOL_SCHEMA, browser_tool
 from ..gateway import (
     CAPABILITY_NETWORK,
     CAPABILITY_READ,
@@ -176,6 +177,21 @@ def build_tool_registry() -> ToolRegistry:
         list_callbacks,
         capabilities={CAPABILITY_READ},
         timeout=30.0,
+    )
+    registry.register(
+        "browser",
+        "Drive the browser: go to a page, click, fill a field, press a key, wait, read "
+        "the text or the html of the page, or take a screenshot. There is no action "
+        "that reads the session and no action that runs JavaScript in the page.",
+        BROWSER_TOOL_SCHEMA,
+        browser_tool,
+        capabilities={CAPABILITY_NETWORK},
+        timeout=60.0,
+        safety_note=(
+            "Every request the browser makes is checked against the scope of the scan "
+            "before it leaves, and the outputs are stripped of anything that looks like "
+            "a credential."
+        ),
     )
     registry.register(
         "list_tool_health",

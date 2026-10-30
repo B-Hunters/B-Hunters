@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 def build_orchestrator(services: Services) -> ScanOrchestrator:
     """Build the orchestrator that runs a scan for the given services."""
+    from ..scanners.browser_adapter import browser_crawl_executor
     from ..scanners.fingerprint_adapter import service_fingerprint_executor
     from ..scanners.graphql_adapter import graphql_analysis_executor
     from ..scanners.karton_bridge import build_worker_bridge
@@ -51,6 +52,7 @@ def build_orchestrator(services: Services) -> ScanOrchestrator:
             "graphql_analysis": graphql_analysis_executor,
             "dependency_analysis": dependency_analysis_executor,
             "asset_crawl": asset_crawl_executor,
+            "browser_crawl": browser_crawl_executor,
         }
     )
 

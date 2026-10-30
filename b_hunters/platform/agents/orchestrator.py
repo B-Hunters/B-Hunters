@@ -347,6 +347,7 @@ class ScanProfile:
                 "openapi_discovery",
                 "graphql_analysis",
                 "asset_crawl",
+                "browser_crawl",
             ],
             max_concurrency=4,
         )
@@ -503,6 +504,9 @@ class ScanOrchestrator:
             audit=self._audit_tool_call,
         )
         self._cancelled_scans: set[str] = set()
+        #: The browser the roles of a scan drive.  It is opened once
+        #: for the scan and closed when the scan ends.
+        self._browser: Any = None
         #: The ledger of the failures of every scan this orchestrator
         #: ran.  It is what decides whether a scan can be called clean.
         self._ledgers: dict[str, ErrorLedger] = {}
@@ -785,6 +789,11 @@ class ScanOrchestrator:
         scope = ScopeEnforcer(context.scope_policy())
         plan = self.build_plan(context)
 
+        # The browser is opened once for the scan and shared by the
+        # roles that use it: opening a Chromium per task would spend
+        # the budget of the scan on browsers.
+        await self._open_browser(context)
+
         # Persist the plan as tasks, keeping the plan's task identifiers so
         # that the dependency graph, the agent runs and the persisted task
         # records all refer to the same task.  A task that already
@@ -852,17 +861,21 @@ class ScanOrchestrator:
                 )
                 self.scans.set_phase(context.scan_id, self._phase_after(stage))
         except asyncio.CancelledError:
+            await self._close_browser()
             self._write_integrity(context.scan_id)
             self.scans.set_status(context.scan_id, "cancelled")
             self._emit(context.scan_id, "scan.cancelled", {"at": time.time()})
             raise
         except Exception as exc:
             log.exception("scan %s failed", context.scan_id)
+            await self._close_browser()
             self._note_failure(context.scan_id, "scan", str(exc))
             self._write_integrity(context.scan_id)
             self.scans.set_status(context.scan_id, "failed", error=str(exc))
             self._emit(context.scan_id, "scan.failed", {"error": str(exc)})
             return {"status": "failed", "error": str(exc)}
+
+        await self._close_browser()
 
         if self._is_cancelled(context.scan_id):
             self._write_integrity(context.scan_id)
@@ -2269,6 +2282,51 @@ class ScanOrchestrator:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    async def _open_browser(self, context: ScanContext) -> Any:
+        """Open the browser the roles drive.
+
+        It is opened only when a role of the scan actually uses it: a
+        browser that is opened for nothing spends the budget of the
+        scan on nothing.
+        """
+        roles = builtin_roles()
+        wanted = any(
+            "browser" in (roles.get(role).tools if roles.get(role) else [])
+            for role in context.profile.agent_roles
+        )
+        if not wanted:
+            return None
+        if self._browser is not None:
+            return self._browser
+        try:
+            from ..browser.scope import ScopeBrowser
+
+            workspace = Path(context.workspace_root or self.settings.agent_workspace_root)
+            await asyncio.to_thread(workspace.mkdir, parents=True, exist_ok=True)
+            browser = ScopeBrowser(
+                policy=context.scope_policy(),
+                workspace=str(workspace),
+            )
+            await browser.start()
+        except Exception:
+            # A scan without a browser is a scan without the browser
+            # tool; it is not a scan that cannot run.
+            log.exception("could not open the browser for the scan")
+            return None
+        self._browser = browser
+        return browser
+
+    async def _close_browser(self) -> None:
+        """Close the browser of the scan."""
+        browser = self._browser
+        self._browser = None
+        if browser is None:
+            return
+        try:
+            await browser.stop()
+        except Exception:  # pragma: no cover - a browser that will not close
+            log.exception("could not close the browser")
+
     def _make_tool_context(
         self, context: ScanContext, task: AgentTask, scope: ScopeEnforcer, workspace: Path
     ) -> ToolContext:
@@ -2297,6 +2355,9 @@ class ScanOrchestrator:
                 # blind finding instead of guessing at it.
                 "callbacks_repository": self.callbacks,
                 "callback_base_url": self.settings.callback_base_url,
+                # The browser the roles drive.  It is opened once for
+                # the scan and closed when the scan ends.
+                "browser": self._browser,
                 "scan_id": context.scan_id,
             },
         )

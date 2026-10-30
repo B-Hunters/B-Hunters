@@ -21,6 +21,7 @@ import asyncio
 import logging
 from typing import Any, Optional
 
+from ..db.repositories import utcnow
 from ..security.scope import ScopeEnforcer, ScopePolicy
 
 log = logging.getLogger(__name__)
@@ -44,8 +45,12 @@ class ScopeBrowser:
         enforcer: Optional[ScopeEnforcer] = None,
         on_violation: Any = None,
         resolver: Any = None,
+        workspace: str = "/tmp",
     ) -> None:
         self.policy = policy
+        #: Where the screenshots are written.
+        self.workspace = workspace
+        self._page: Any = None
         self.enforcer = enforcer or ScopeEnforcer(policy, resolver=resolver)
         self.on_violation = on_violation
         self.violations: list[dict[str, str]] = []
@@ -109,6 +114,39 @@ class ScopeBrowser:
                 await route.abort()
 
         await context.route("**/*", handle)
+
+    async def page(self) -> Any:
+        """A page of the browser.
+
+        The page is opened once and kept, so that the state the model
+        built up — the page it is on, what it typed — is still there
+        when it makes the next call.
+        """
+        if getattr(self, "_page", None) is None:
+            self._page = await self.context.new_page()
+        return self._page
+
+    async def cookies(self) -> list[dict[str, Any]]:
+        """The cookies of the browser."""
+        try:
+            return [dict(cookie) for cookie in await self.context.cookies()]
+        except Exception:  # pragma: no cover - a browser without a context
+            return []
+
+    async def screenshot(self, page: Any) -> str:
+        """A screenshot of the page, written into the workspace.
+
+        The path is returned so that the operator can look at what the
+        model saw.  A screenshot is evidence, not decoration.
+        """
+        from pathlib import Path
+
+        directory = Path(self.workspace) / "screenshots"
+        directory.mkdir(parents=True, exist_ok=True)
+        name = f"{utcnow()}-{len(list(directory.glob('*.png')))}.png"
+        path = directory / name
+        await page.screenshot(path=str(path))
+        return str(path)
 
     async def stop(self) -> None:
         """Close the browser."""
