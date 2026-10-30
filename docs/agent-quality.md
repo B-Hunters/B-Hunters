@@ -124,6 +124,16 @@ the root of the target and asked for level 1 and risk 1, which is the
 shallowest setting it has; it now crawls, asks for more, and ignores
 the 401s of an application that answers them. See `docs/tooling.md`.
 
+## A role that was cut off keeps what it found
+
+The findings of a role travel in its final answer. A role that ran out
+of time never gave one, and everything it had found was lost with it.
+
+What the role last said is now read as its answer: the findings it
+names are kept and judged like any other, and the run keeps the status
+that says it was cut off. A role that recorded something already keeps
+that — the salvage never overwrites what was found.
+
 ## How many roles a scan runs
 
 The measured cost of one role, from a scan of the laboratory:
@@ -147,5 +157,9 @@ on it — and the roles that do not run are recorded as `wall_clock` with
 the reason, not left pending. A scan that says what it did not do is
 worth more than one that looks busy.
 
-To run every role, give the scan the time: at the measured cost,
-twelve roles need a scan of roughly forty minutes.
+To run every role, give the scan the time. At the measured cost,
+twelve roles need nine minutes of agent time and the workers need
+their share of the rest, so **a scan of thirty minutes runs and judges
+everything**. The platform's default scan is an hour, so every role
+runs without anybody having to tune anything; the limit only matters
+for a scan that is deliberately short.
