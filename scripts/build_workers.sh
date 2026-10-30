@@ -81,6 +81,8 @@ cd "${BUILD_DIR}"
 WHEEL="$(ls "${BUILD_DIR}"/b_hunters-*.whl | head -1)"
 echo "    ${WHEEL}"
 
+FAILED=()
+
 for worker in "${SELECTED[@]}"; do
   repo=""
   for pair in "${WORKER_REPOS[@]}"; do
@@ -120,20 +122,35 @@ for line in text.splitlines(keepends=True):
         # dependencies.  The wheel built from this repository is then
         # laid over it, so the shared class is the one this repository
         # has and the dependencies are the ones the release declares.
+        #
+        # The flags of the original line are carried over: an image
+        # that installs into the system packages needs to be told so
+        # again.
+        flags = ""
+        if "--break-system-packages" in line:
+            flags = " --break-system-packages"
         lines.append(f"COPY {wheel} /tmp/{wheel}\n")
         lines.append(
-            "RUN pip install --no-cache-dir --no-deps --force-reinstall "
-            f"/tmp/{wheel} && rm -f /tmp/{wheel}\n"
+            "RUN pip install --no-cache-dir --no-deps --force-reinstall"
+            f"{flags} /tmp/{wheel} && rm -f /tmp/{wheel}\n"
         )
 target.write_text("".join(lines))
 PYTHON
 
-  (
+  # One worker that fails to build must not stop the others.
+  if ! (
     cd "${repo}"
     docker build -q -f Dockerfile.local -t "b-hunters-local/${worker}:${VERSION}" .
-  )
+  ); then
+    FAILED+=("${worker}")
+  fi
   rm -f "${repo}/Dockerfile.local" "${repo}/${name}"
 done
+
+if [ "${#FAILED[@]}" -gt 0 ]; then
+  echo "==> these workers did not build: ${FAILED[*]}"
+  exit 1
+fi
 
 echo "==> the worker images are built"
 echo
