@@ -119,7 +119,7 @@ ROLE_PRIORITY = (
 #: The roles that judge the findings rather than look for them.  They
 #: are the ones that give a finding its verdict, and a finding without
 #: a verdict is a guess.
-JUDGING_ROLES = ("verifier", "adjudicator")
+JUDGING_ROLES = VERIFICATION_ROLES + REPORTING_ROLES
 
 #: The adapter that crawls the target.  It runs in the second native
 #: wave: it seeds itself from the URLs the fingerprinters recorded.
@@ -2075,26 +2075,72 @@ class ScanOrchestrator:
             self._apply_verdicts(context, candidates, run.findings)
 
         # Persist any findings the agent proposed.
-        for finding in parse_findings(run.findings, role=task.role, task_id=task.task_id):
+        self._persist_agent_findings(
+            context=context,
+            role=task.role,
+            task_id=task.task_id,
+            findings=run.findings,
+        )
+        return run
+
+    def _persist_agent_findings(
+        self,
+        *,
+        context: ScanContext,
+        role: str,
+        task_id: str,
+        findings: Any,
+    ) -> None:
+        """Store the findings an agent proposed.
+
+        The judging roles do not propose.  A judge that proposed would
+        put the same defect into the report a second time — with no
+        verdict, and with no host, so it could neither merge with the
+        first nor be dismissed.  They rule on what the other roles
+        found, and that is all they do.
+        """
+        if role in JUDGING_ROLES:
+            return
+
+        default_host = self._default_host(context)
+        for finding in parse_findings(findings, role=role, task_id=task_id):
             self.findings.upsert(
                 scan_id=context.scan_id,
                 title=finding.title,
                 summary=finding.summary,
                 vuln_class=finding.vuln_class,
                 severity=finding.severity,
-                host=finding.host,
+                # A finding without a host cannot be matched to the
+                # target, and cannot merge with the finding the tools
+                # reported for the same defect.  The agent was working
+                # on one target, so its finding belongs to that target.
+                host=finding.host or default_host,
                 path=finding.path,
                 parameter=finding.parameter,
                 cwe=finding.cwe,
                 confidence=finding.confidence,
-                detected_by=[task.role],
+                detected_by=[role],
                 detection_source="agent",
                 affected_url=finding.affected_url,
                 evidence=finding.evidence,
                 remediation=finding.remediation,
                 extra_key=finding.extra_key,
             )
-        return run
+
+    @staticmethod
+    def _default_host(context: ScanContext) -> str:
+        """The host of the target a scan is working on."""
+        hosts = list(context.authorized_hosts or ())
+        if hosts:
+            return hosts[0]
+        for target in context.targets or ():
+            try:
+                host = urlsplit(target).hostname or ""
+            except ValueError:
+                host = ""
+            if host:
+                return host
+        return ""
 
     def _apply_verdicts(
         self,

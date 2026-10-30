@@ -190,6 +190,40 @@ AGENT_OUTPUT_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+#: The schema of the role that reconciles and reports.
+#:
+#: It is the schema of an agent without a ``findings`` array.  A judge
+#: rules on the findings the other roles proposed; it does not propose
+#: findings of its own.  When it did, its proposals were the same
+#: defects again — a second copy of a finding the tools had already
+#: reported, with no verdict and no host, so it could neither merge
+#: with the first nor be dismissed.
+JUDGEMENT_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "conclusion": {"type": "string", "description": "What you concluded, in 1-5 sentences."},
+        "confidence": {
+            "type": "string",
+            "enum": ["none", "low", "medium", "high", "confirmed"],
+        },
+        "observations": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Concrete observations that back the conclusion.",
+        },
+        "uncertainty": {
+            "type": "string",
+            "description": "What you could not determine and why.",
+        },
+        "next_step": {
+            "type": "string",
+            "description": "The single most useful next action, or empty if you are done.",
+        },
+    },
+    "required": ["conclusion", "confidence", "observations"],
+    "additionalProperties": False,
+}
+
 VERIFICATION_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -812,7 +846,7 @@ BUILTIN_ROLES: list[AgentRole] = [
                 "record_verdicts",
             ],
         ),
-        output_schema=AGENT_OUTPUT_SCHEMA,
+        output_schema=JUDGEMENT_OUTPUT_SCHEMA,
         budget={"max_rounds": 12, "max_tool_calls": 60, "max_tokens": 400000, "max_wall_clock_seconds": 1200},
         stage="reporting",
     ),
