@@ -211,6 +211,112 @@ async def _provider_health(services: Services) -> list[dict[str, Any]]:
     return results
 
 
+#: The most days a trend may look back.
+MAX_TREND_DAYS = 365
+
+#: The severities, worst first.  The order is the order a reader wants
+#: them in; it is not alphabetical.
+SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
+
+#: The states that mean the issue is still to be dealt with.
+OPEN_TRIAGE_STATES = ("open", "in_progress")
+
+
+def _week_start(moment: float) -> float:
+    """The start of the week a moment falls in."""
+    import datetime
+
+    day = datetime.datetime.fromtimestamp(moment, tz=datetime.timezone.utc)
+    midnight = datetime.datetime(day.year, day.month, day.day, tzinfo=datetime.timezone.utc)
+    return midnight.timestamp() - midnight.weekday() * 86400
+
+
+@router.get("/dashboard/trends")
+async def trends(
+    days: int = Query(default=30, ge=1, le=MAX_TREND_DAYS),
+    target_key: str = "",
+    user: CurrentUser = Depends(current_user),
+    services: Services = Depends(get_services),
+) -> dict[str, Any]:
+    """The triage trend.
+
+    Every number is per issue, not per occurrence: the same problem
+    found by three scans is one problem.  Counting it three times would
+    make a platform that finds more look worse, not better.
+    """
+    import datetime
+
+    window = max(1, min(int(days), MAX_TREND_DAYS))
+    now = time.time()
+    since = now - window * 86400
+    issues = services.issues.list(target_key=target_key, limit=1000)
+
+    # The open issues by severity.
+    open_by_severity: dict[str, int] = dict.fromkeys(SEVERITY_ORDER, 0)
+    for issue in issues:
+        if str(issue.get("triage_status", "")) not in OPEN_TRIAGE_STATES:
+            continue
+        if float(issue.get("created_at", 0) or 0) < since:
+            continue
+        severity = str(issue.get("severity", "info"))
+        open_by_severity[severity] = open_by_severity.get(severity, 0) + 1
+    open_rows = [
+        {"severity": severity, "count": count} for severity, count in open_by_severity.items() if count
+    ]
+
+    # What was new and what was closed, per week.
+    weeks: dict[float, dict[str, int]] = {}
+    for issue in issues:
+        created = float(issue.get("created_at", 0) or 0)
+        if created < since:
+            continue
+        week = weeks.setdefault(_week_start(created), {"new": 0, "fixed": 0})
+        week["new"] += 1
+        if str(issue.get("triage_status", "")) == "fixed":
+            week["fixed"] += 1
+    new_vs_fixed = [
+        {
+            "week": datetime.datetime.fromtimestamp(week, tz=datetime.timezone.utc).date().isoformat(),
+            "new": row["new"],
+            "fixed": row["fixed"],
+        }
+        for week, row in sorted(weeks.items())
+    ]
+
+    # The rate at which the findings are verified.
+    findings = services.findings.list(limit=1000)
+    judged = [
+        finding
+        for finding in findings
+        if str(finding.get("verification_status", "")) in {"confirmed", "rejected"}
+    ]
+    verified_rate = 0.0
+    if judged:
+        confirmed = sum(1 for finding in judged if finding.get("verification_status") == "confirmed")
+        verified_rate = round(confirmed / len(judged), 4)
+
+    # How long an issue waits before it is dealt with.
+    triage_times: list[float] = []
+    for issue in issues:
+        created = float(issue.get("created_at", 0) or 0)
+        updated = float(issue.get("updated_at", 0) or 0)
+        if not created or updated <= created:
+            continue
+        if str(issue.get("triage_status", "")) == "open":
+            continue
+        triage_times.append(updated - created)
+    mean_time_to_triage = int(sum(triage_times) / len(triage_times)) if triage_times else 0
+
+    return {
+        "days": window,
+        "open_by_severity": open_rows,
+        "new_vs_fixed": new_vs_fixed,
+        "verified_rate": verified_rate,
+        "mean_time_to_triage_seconds": mean_time_to_triage,
+        "open_issues": sum(row["count"] for row in open_rows),
+    }
+
+
 @router.get("/scans/{scan_id}/stream")
 async def scan_stream(
     scan_id: str,

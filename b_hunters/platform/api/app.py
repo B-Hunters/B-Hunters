@@ -30,6 +30,7 @@ from .routers import (
     inventory,
     issues,
     karton,
+    notifications,
     scans,
 )
 
@@ -86,6 +87,7 @@ def create_app(
     app.include_router(karton.router, prefix=prefix)
     app.include_router(admin.router, prefix=prefix)
     app.include_router(issues.router, prefix=prefix)
+    app.include_router(notifications.router, prefix=prefix)
     app.include_router(dashboard.router, prefix=prefix)
     app.include_router(benchmarks.router, prefix=prefix)
 

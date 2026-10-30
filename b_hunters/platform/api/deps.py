@@ -15,6 +15,7 @@ from ..db.comments import CommentRepository
 from ..db.identities import IdentityRepository
 from ..db.issues import IssueRepository
 from ..db.jobs import JobRepository, TargetLockRepository
+from ..db.notifications import NotificationRepository, TokenRepository
 from ..db.repositories import (
     AgentDefinitionRepository,
     AgentStateRepository,
@@ -54,6 +55,9 @@ class CurrentUser:
     username: str
     role: str
     session: Optional[Session] = None
+    #: The scopes of the API token the caller authenticated with, when
+    #: it authenticated with one.
+    scopes: tuple[str, ...] = ()
 
     @property
     def is_admin(self) -> bool:
@@ -61,6 +65,17 @@ class CurrentUser:
 
     def can(self, minimum: str) -> bool:
         return ROLE_RANK.get(self.role, 0) >= ROLE_RANK.get(minimum, 99)
+
+    def has_scope(self, scope: str) -> bool:
+        """Whether the caller carries a scope.
+
+        A session carries no scopes and is allowed everything the
+        operator may do: there is one operator, and the session is the
+        operator's own browser.
+        """
+        if not self.scopes:
+            return True
+        return scope in self.scopes or "admin" in self.scopes
 
 
 class Services:
@@ -82,6 +97,10 @@ class Services:
         self.issues = IssueRepository(self.db)
         #: What the operator said about the issues.
         self.comments = CommentRepository(self.db)
+        #: The API tokens a pipeline authenticates with.
+        self.tokens = TokenRepository(self.db)
+        #: The webhooks the platform posts to.
+        self.notifications = NotificationRepository(self.db)
         self.findings = FindingRepository(self.db, issues=self.issues)
         #: The encryption of the stored credentials.  ``None`` when the
         #: deployment has not configured a key yet.  It is built before
@@ -183,15 +202,49 @@ def get_session_from_request(request: Request, services: Services) -> Optional[S
     )
 
 
+def get_token_from_request(request: Request, services: Services) -> Optional[dict[str, Any]]:
+    """The API token the request carries, when it carries one."""
+    header = request.headers.get("authorization", "")
+    if not header.lower().startswith("bearer "):
+        return None
+    plaintext = header[7:].strip()
+    if not plaintext:
+        return None
+    return services.tokens.authenticate(plaintext)
+
+
 async def current_user(
     request: Request,
     services: Services = Depends(get_services),
 ) -> CurrentUser:
-    """FastAPI dependency that resolves the authenticated user."""
+    """FastAPI dependency that resolves the authenticated user.
+
+    A caller is either a browser session or an API token.  The token is
+    for a pipeline: it carries scopes rather than a role, and the role
+    it acts with is the one of the user it was made for.
+    """
     session = get_session_from_request(request, services)
-    if session is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
-    return CurrentUser(user_id=session.user_id, username=session.username, role=session.role, session=session)
+    if session is not None:
+        return CurrentUser(
+            user_id=session.user_id,
+            username=session.username,
+            role=session.role,
+            session=session,
+        )
+
+    token = get_token_from_request(request, services)
+    if token is not None:
+        user = services.users.get_by_id(str(token.get("user_id", "")))
+        role = str((user or {}).get("role", "")) or ROLE_OPERATOR
+        username = str((user or {}).get("username", "")) or str(token.get("name", "token"))
+        return CurrentUser(
+            user_id=str(token.get("user_id", "")),
+            username=username,
+            role=role,
+            scopes=tuple(token.get("scopes", ()) or ()),
+        )
+
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
 
 
 async def optional_user(
@@ -224,8 +277,15 @@ async def enforce_csrf(
     services: Services = Depends(get_services),
     x_csrf_token: Optional[str] = Header(default=None, alias="X-CSRF-Token"),
 ) -> None:
-    """Enforce CSRF protection on unsafe methods."""
+    """Enforce CSRF protection on unsafe methods.
+
+    A request that carries an API token is exempt: a token is put in
+    the request by the caller, never by the browser automatically, so
+    there is nothing for a third-party page to forge.
+    """
     if not requires_csrf(request.method):
+        return
+    if get_token_from_request(request, services) is not None:
         return
     session = get_session_from_request(request, services)
     if session is None:

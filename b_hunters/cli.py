@@ -15,26 +15,28 @@ from karton.core.inspect import KartonState
 
 
 def monogocon(config):
-    mongoconfig=config["mongo"]
-    username =mongoconfig["user"]
+    mongoconfig = config["mongo"]
+    username = mongoconfig["user"]
     password = mongoconfig["password"]
-    db=mongoconfig["db"]
-    host = mongoconfig["host"] # This could be your server address or "localhost" for a local server
-    port =  mongoconfig["port"] # MongoDB default port
+    db = mongoconfig["db"]
+    host = mongoconfig["host"]  # This could be your server address or "localhost" for a local server
+    port = mongoconfig["port"]  # MongoDB default port
 
     # Connection string with authentication
     connection_string = f"mongodb://{username}:{password}@{host}:{port}/"
     client = pymongo.MongoClient(connection_string)
     try:
-        client.admin.command('ping')
+        client.admin.command("ping")
     except pymongo.errors.ConnectionFailure:
         raise Exception("Mongo Connection Failed") from None
 
     db = client[db]
     return db
 
+
 # Initialize colorama for cross-platform compatibility
 init(autoreset=True)
+
 
 def main():
     # Create the argument parser
@@ -59,89 +61,184 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
     logging.info(banner)
 
     # Add subcommands
-    subparsers = parser.add_subparsers(dest='command', required=True, help=f"{Fore.YELLOW}Specify either 'scan', 'report' , or 'status'")
+    subparsers = parser.add_subparsers(
+        dest="command", required=True, help=f"{Fore.YELLOW}Specify either 'scan', 'report' , or 'status'"
+    )
 
-    parser.add_argument('--config', '-c', type=str, help=f"{Fore.YELLOW}Optional path to configuration file", default="/etc/b-hunters/b-hunters.ini")
+    parser.add_argument(
+        "--config",
+        "-c",
+        type=str,
+        help=f"{Fore.YELLOW}Optional path to configuration file",
+        default="/etc/b-hunters/b-hunters.ini",
+    )
 
     # Scan command
-    scan_parser = subparsers.add_parser('scan', help=f"{Fore.CYAN}Run a scan operation on a specified domain")
-    scan_parser.add_argument('--domain', '-d', type=str, required=True, help=f"{Fore.YELLOW}Target domain for scanning")
-    scan_parser.add_argument('--description', type=str, help=f"{Fore.YELLOW}Optional description for the scan")
-    scan_parser.add_argument('--scantype', "-t", choices=['single', 'multi'], required=True, help=f"{Fore.YELLOW}Type of scan: 'single' or 'multi'")
+    scan_parser = subparsers.add_parser("scan", help=f"{Fore.CYAN}Run a scan operation on a specified domain")
+    scan_parser.add_argument(
+        "--domain", "-d", type=str, required=True, help=f"{Fore.YELLOW}Target domain for scanning"
+    )
+    scan_parser.add_argument(
+        "--description", type=str, help=f"{Fore.YELLOW}Optional description for the scan"
+    )
+    scan_parser.add_argument(
+        "--scantype",
+        "-t",
+        choices=["single", "multi"],
+        required=True,
+        help=f"{Fore.YELLOW}Type of scan: 'single' or 'multi'",
+    )
 
     # Report command
-    report_parser = subparsers.add_parser('report', help=f"{Fore.CYAN}Generate a scan report")
-    report_parser.add_argument('--domain', '-d', type=str, required=True, help=f"{Fore.YELLOW}Specify the domain for the report")
-    report_parser.add_argument('--output', '-o', type=str, help=f"{Fore.YELLOW}Optional path to save the report output")
+    report_parser = subparsers.add_parser("report", help=f"{Fore.CYAN}Generate a scan report")
+    report_parser.add_argument(
+        "--domain", "-d", type=str, required=True, help=f"{Fore.YELLOW}Specify the domain for the report"
+    )
+    report_parser.add_argument(
+        "--output", "-o", type=str, help=f"{Fore.YELLOW}Optional path to save the report output"
+    )
 
     # Status  command
-    status_parser = subparsers.add_parser('status', help=f"{Fore.CYAN}Get the status of the system")
-    status_parser.add_argument('-s','--stuck', action='store_true', help=f"{Fore.YELLOW}Optional argument to restart stuck tasks periodically")
+    status_parser = subparsers.add_parser("status", help=f"{Fore.CYAN}Get the status of the system")
+    status_parser.add_argument(
+        "-s",
+        "--stuck",
+        action="store_true",
+        help=f"{Fore.YELLOW}Optional argument to restart stuck tasks periodically",
+    )
 
     # --- platform commands ------------------------------------------------
-    serve_parser = subparsers.add_parser('serve', help=f"{Fore.CYAN}Run the authenticated platform API and web UI")
-    serve_parser.add_argument('--host', type=str, default=None, help=f"{Fore.YELLOW}Bind address")
-    serve_parser.add_argument('--port', type=int, default=None, help=f"{Fore.YELLOW}Bind port")
-    serve_parser.add_argument('--reload', action='store_true', help=f"{Fore.YELLOW}Enable auto-reload (development only)")
+    serve_parser = subparsers.add_parser(
+        "serve", help=f"{Fore.CYAN}Run the authenticated platform API and web UI"
+    )
+    serve_parser.add_argument("--host", type=str, default=None, help=f"{Fore.YELLOW}Bind address")
+    serve_parser.add_argument("--port", type=int, default=None, help=f"{Fore.YELLOW}Bind port")
+    serve_parser.add_argument(
+        "--reload", action="store_true", help=f"{Fore.YELLOW}Enable auto-reload (development only)"
+    )
 
-    admin_parser = subparsers.add_parser('admin', help=f"{Fore.CYAN}Platform administration")
-    admin_sub = admin_parser.add_subparsers(dest='admin_command', required=True)
-    bootstrap = admin_sub.add_parser('bootstrap', help=f"{Fore.YELLOW}Create the initial administrator account")
-    bootstrap.add_argument('--username', type=str, default='admin')
-    bootstrap.add_argument('--password', type=str, default=None, help=f"{Fore.YELLOW}Read the password from BHUNTERS_BOOTSTRAP_PASSWORD or prompt for it")
-    add_user = admin_sub.add_parser('add-user', help=f"{Fore.YELLOW}Create a platform user")
-    add_user.add_argument('--username', type=str, required=True)
-    add_user.add_argument('--password', type=str, default=None)
-    add_user.add_argument('--role', type=str, default='viewer', choices=['admin', 'operator', 'viewer'])
-    admin_sub.add_parser('list-users', help=f"{Fore.YELLOW}List the platform users")
-    admin_sub.add_parser('init-db', help=f"{Fore.YELLOW}Create the database indexes")
-    admin_sub.add_parser('seed-roles', help=f"{Fore.YELLOW}Seed the built-in agent definitions")
-    add_provider = admin_sub.add_parser('add-provider', help=f"{Fore.YELLOW}Configure a model provider")
-    add_provider.add_argument('--name', type=str, required=True)
-    add_provider.add_argument('--base-url', type=str, required=True, help=f"{Fore.YELLOW}The OpenAI-compatible base URL")
-    add_provider.add_argument('--model', type=str, required=True)
-    add_provider.add_argument('--api-key', type=str, default=None, help=f"{Fore.YELLOW}Read from BHUNTERS_LLM_API_KEY when omitted")
-    add_provider.add_argument('--role-model', type=str, action='append', default=[], help=f"{Fore.YELLOW}Override the model for a role: role=model")
-    add_provider.add_argument('--timeout', type=float, default=120.0)
-    add_provider.add_argument('--max-retries', type=int, default=2)
-    add_provider.add_argument('--concurrency', type=int, default=4)
-    admin_sub.add_parser('list-providers', help=f"{Fore.YELLOW}List the configured model providers")
-    admin_sub.add_parser('check-provider', help=f"{Fore.YELLOW}Check the connectivity of a provider").add_argument('name', type=str)
-    admin_sub.add_parser('migrate-issues', help=f"{Fore.YELLOW}Link existing findings to durable issues")
-    admin_sub.add_parser('migrate-secrets', help=f"{Fore.YELLOW}Encrypt the stored credentials with BHUNTERS_SECRET_KEY")
-    set_password = admin_sub.add_parser('set-password', help=f"{Fore.YELLOW}Set the password of a platform user")
-    set_password.add_argument('--username', type=str, required=True)
-    set_password.add_argument('--password', type=str, default=None)
+    admin_parser = subparsers.add_parser("admin", help=f"{Fore.CYAN}Platform administration")
+    admin_sub = admin_parser.add_subparsers(dest="admin_command", required=True)
+    bootstrap = admin_sub.add_parser(
+        "bootstrap", help=f"{Fore.YELLOW}Create the initial administrator account"
+    )
+    bootstrap.add_argument("--username", type=str, default="admin")
+    bootstrap.add_argument(
+        "--password",
+        type=str,
+        default=None,
+        help=f"{Fore.YELLOW}Read the password from BHUNTERS_BOOTSTRAP_PASSWORD or prompt for it",
+    )
+    add_user = admin_sub.add_parser("add-user", help=f"{Fore.YELLOW}Create a platform user")
+    add_user.add_argument("--username", type=str, required=True)
+    add_user.add_argument("--password", type=str, default=None)
+    add_user.add_argument("--role", type=str, default="viewer", choices=["admin", "operator", "viewer"])
+    admin_sub.add_parser("list-users", help=f"{Fore.YELLOW}List the platform users")
+    admin_sub.add_parser("init-db", help=f"{Fore.YELLOW}Create the database indexes")
+    admin_sub.add_parser("seed-roles", help=f"{Fore.YELLOW}Seed the built-in agent definitions")
+    add_provider = admin_sub.add_parser("add-provider", help=f"{Fore.YELLOW}Configure a model provider")
+    add_provider.add_argument("--name", type=str, required=True)
+    add_provider.add_argument(
+        "--base-url", type=str, required=True, help=f"{Fore.YELLOW}The OpenAI-compatible base URL"
+    )
+    add_provider.add_argument("--model", type=str, required=True)
+    add_provider.add_argument(
+        "--api-key", type=str, default=None, help=f"{Fore.YELLOW}Read from BHUNTERS_LLM_API_KEY when omitted"
+    )
+    add_provider.add_argument(
+        "--role-model",
+        type=str,
+        action="append",
+        default=[],
+        help=f"{Fore.YELLOW}Override the model for a role: role=model",
+    )
+    add_provider.add_argument("--timeout", type=float, default=120.0)
+    add_provider.add_argument("--max-retries", type=int, default=2)
+    add_provider.add_argument("--concurrency", type=int, default=4)
+    admin_sub.add_parser("list-providers", help=f"{Fore.YELLOW}List the configured model providers")
+    admin_sub.add_parser(
+        "check-provider", help=f"{Fore.YELLOW}Check the connectivity of a provider"
+    ).add_argument("name", type=str)
+    admin_sub.add_parser("migrate-issues", help=f"{Fore.YELLOW}Link existing findings to durable issues")
+    admin_sub.add_parser(
+        "migrate-secrets", help=f"{Fore.YELLOW}Encrypt the stored credentials with BHUNTERS_SECRET_KEY"
+    )
+    set_password = admin_sub.add_parser(
+        "set-password", help=f"{Fore.YELLOW}Set the password of a platform user"
+    )
+    set_password.add_argument("--username", type=str, required=True)
+    set_password.add_argument("--password", type=str, default=None)
     rotate_key = admin_sub.add_parser(
-        'rotate-key', help=f"{Fore.YELLOW}Re-encrypt the stored credentials with a new key"
+        "rotate-key", help=f"{Fore.YELLOW}Re-encrypt the stored credentials with a new key"
     )
-    rotate_key.add_argument('--key', type=str, default=None, help="The new key; one is generated when it is omitted")
     rotate_key.add_argument(
-        '--write-to', type=str, default=None, help="The environment file to write the new key to"
+        "--key", type=str, default=None, help="The new key; one is generated when it is omitted"
+    )
+    rotate_key.add_argument(
+        "--write-to", type=str, default=None, help="The environment file to write the new key to"
     )
 
-    bench_parser = subparsers.add_parser('bench', help=f"{Fore.CYAN}Vulnerable application benchmark laboratory")
-    bench_sub = bench_parser.add_subparsers(dest='bench_command', required=True)
-    bench_sub.add_parser('sync', help=f"{Fore.YELLOW}Load the benchmark manifests into the database")
-    bench_lab = bench_sub.add_parser('lab', help=f"{Fore.YELLOW}Manage the vulnerable application laboratory")
-    bench_lab.add_argument('action', choices=['up', 'down', 'status'])
-    bench_lab.add_argument('--applications', type=str, default='', help=f"{Fore.YELLOW}Comma separated application slugs")
-    bench_run = bench_sub.add_parser('run', help=f"{Fore.YELLOW}Run the benchmark suite")
-    bench_run.add_argument('--applications', type=str, default='', help=f"{Fore.YELLOW}Comma separated application slugs")
-    bench_run.add_argument('--provider', type=str, default='')
-    bench_run.add_argument('--profile', type=str, default='standard')
-    bench_run.add_argument('--start-lab', action='store_true')
-    bench_sub.add_parser('scores', help=f"{Fore.YELLOW}Show the recorded benchmark scores")
+    bench_parser = subparsers.add_parser(
+        "bench", help=f"{Fore.CYAN}Vulnerable application benchmark laboratory"
+    )
+    bench_sub = bench_parser.add_subparsers(dest="bench_command", required=True)
+    bench_sub.add_parser("sync", help=f"{Fore.YELLOW}Load the benchmark manifests into the database")
+    bench_lab = bench_sub.add_parser("lab", help=f"{Fore.YELLOW}Manage the vulnerable application laboratory")
+    bench_lab.add_argument("action", choices=["up", "down", "status"])
+    bench_lab.add_argument(
+        "--applications", type=str, default="", help=f"{Fore.YELLOW}Comma separated application slugs"
+    )
+    bench_run = bench_sub.add_parser("run", help=f"{Fore.YELLOW}Run the benchmark suite")
+    bench_run.add_argument(
+        "--applications", type=str, default="", help=f"{Fore.YELLOW}Comma separated application slugs"
+    )
+    bench_run.add_argument("--provider", type=str, default="")
+    bench_run.add_argument("--profile", type=str, default="standard")
+    bench_run.add_argument("--start-lab", action="store_true")
+    bench_sub.add_parser("scores", help=f"{Fore.YELLOW}Show the recorded benchmark scores")
 
-    contracts_parser = subparsers.add_parser('contracts', help=f"{Fore.CYAN}Check the worker message contracts")
-    contracts_parser.add_argument('--workers', type=str, default='', help=f"{Fore.YELLOW}Directory holding the worker repositories")
-    contracts_parser.add_argument('--strict', action='store_true', help=f"{Fore.YELLOW}Exit non-zero on warnings as well as errors")
+    contracts_parser = subparsers.add_parser(
+        "contracts", help=f"{Fore.CYAN}Check the worker message contracts"
+    )
+    contracts_parser.add_argument(
+        "--workers", type=str, default="", help=f"{Fore.YELLOW}Directory holding the worker repositories"
+    )
+    contracts_parser.add_argument(
+        "--strict", action="store_true", help=f"{Fore.YELLOW}Exit non-zero on warnings as well as errors"
+    )
+
+    # CI command
+    ci_parser = subparsers.add_parser("ci", help=f"{Fore.CYAN}Scan from a pipeline")
+    ci_sub = ci_parser.add_subparsers(dest="ci_command", required=True)
+    ci_scan_parser = ci_sub.add_parser("scan", help=f"{Fore.YELLOW}Scan a target and fail on a finding")
+    ci_scan_parser.add_argument(
+        "--target", "-t", type=str, required=True, help=f"{Fore.YELLOW}The url to scan"
+    )
+    ci_scan_parser.add_argument(
+        "--base-url", type=str, default="", help=f"{Fore.YELLOW}The platform api address"
+    )
+    ci_scan_parser.add_argument(
+        "--token", type=str, default="", help=f"{Fore.YELLOW}The API token to authenticate with"
+    )
+    ci_scan_parser.add_argument("--profile", type=str, default="standard")
+    ci_scan_parser.add_argument(
+        "--fail-on", type=str, default="high", choices=["critical", "high", "medium", "low", "info", "none"]
+    )
+    ci_scan_parser.add_argument(
+        "--no-wait",
+        dest="wait",
+        action="store_false",
+        help=f"{Fore.YELLOW}Do not wait for the scan to finish",
+    )
+    ci_scan_parser.add_argument(
+        "--timeout", type=int, default=3600, help=f"{Fore.YELLOW}How long to wait for the scan"
+    )
 
     # Runner command
-    runner_parser = subparsers.add_parser('runner', help=f"{Fore.CYAN}Run the durable job runner")
-    runner_parser.add_argument('--concurrency', type=int, default=None)
-    runner_parser.add_argument('--once', action='store_true', help="Claim and run a single job, then exit")
-    runner_parser.add_argument('--poll-seconds', type=float, default=None)
+    runner_parser = subparsers.add_parser("runner", help=f"{Fore.CYAN}Run the durable job runner")
+    runner_parser.add_argument("--concurrency", type=int, default=None)
+    runner_parser.add_argument("--once", action="store_true", help="Claim and run a single job, then exit")
+    runner_parser.add_argument("--poll-seconds", type=float, default=None)
     runner_sub = runner_parser.add_subparsers(dest="runner_command")
     runner_sub.add_parser("status", help=f"{Fore.YELLOW}Show whether a runner is alive")
 
@@ -149,30 +246,32 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
     args = parser.parse_args()
 
     # The platform commands do not need the legacy Karton/Mongo bootstrap.
-    if args.command == 'serve':
+    if args.command == "serve":
         return _serve(args)
-    if args.command == 'admin':
+    if args.command == "admin":
         return _admin(args)
-    if args.command == 'bench':
+    if args.command == "bench":
         return _bench(args)
-    if args.command == 'contracts':
+    if args.command == "contracts":
         return _contracts(args)
-    if args.command == 'runner':
+    if args.command == "runner":
         return _runner(args)
+    if args.command == "ci":
+        return _ci(args)
 
     config = Config(path=args.config)
-    global db, s3,producer
-    db=monogocon(config)
+    global db, s3, producer
+    db = monogocon(config)
 
-    producer=Producer(config=config,identity="B-hunters-ClI")
-    s3=producer.backend.s3
+    producer = Producer(config=config, identity="B-hunters-ClI")
+    s3 = producer.backend.s3
     # Execute commands
-    if args.command == 'scan':
+    if args.command == "scan":
         run_scan(args.domain, args.scantype, args.description)
 
-    elif args.command == 'report':
+    elif args.command == "report":
         generate_report(args.domain, args.output)
-    elif args.command == 'status':
+    elif args.command == "status":
         global state, tools
         state = KartonState(producer.backend)
         tools = list(state.binds.keys())
@@ -183,7 +282,8 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
             while True:
                 restart_stuck_tasks()
                 logging.info("Sleeping for 3 hours...")
-                time.sleep(60*3)
+                time.sleep(60 * 3)
+
 
 def get_files_names():
     """Retrieve all file names from the S3 'bhunters' bucket using pagination.
@@ -210,51 +310,54 @@ def get_files_names():
     """
     files = []
     bucket_name = "bhunters"
-    params = {'Bucket': bucket_name}
+    params = {"Bucket": bucket_name}
 
     while True:
         response = s3.list_objects_v2(**params)
 
-        if 'Contents' in response:
-            files.extend(obj['Key'] for obj in response['Contents'])
+        if "Contents" in response:
+            files.extend(obj["Key"] for obj in response["Contents"])
 
         # Break if no more objects to fetch
-        if not response.get('IsTruncated'):
+        if not response.get("IsTruncated"):
             break
 
         # Update continuation token for next iteration
-        params['ContinuationToken'] = response['NextContinuationToken']
+        params["ContinuationToken"] = response["NextContinuationToken"]
 
     return files
+
 
 # Example scan function
 def run_scan(domain, scantype, description=None):
     collection = db["scans"]
     existing_document = collection.find_one({"Domain": domain})
-    domain = re.sub(r'^https?://', '', domain)
-    domain = domain.rstrip('/')
+    domain = re.sub(r"^https?://", "", domain)
+    domain = domain.rstrip("/")
 
     if existing_document is None:
-        new_document = {"Domain": domain,"Type":scantype,"Description":description}
+        new_document = {"Domain": domain, "Type": scantype, "Description": description}
         result = collection.insert_one(new_document)
         if result.acknowledged:
-            scan_id=str(result.inserted_id)
-            task = Task({"type": 'domain',
-            "stage": 'new'})
+            scan_id = str(result.inserted_id)
+            task = Task({"type": "domain", "stage": "new"})
 
-            task.add_payload("domain", domain,persistent=True)
-            task.add_payload("scantype", scantype,persistent=True)
+            task.add_payload("domain", domain, persistent=True)
+            task.add_payload("scantype", scantype, persistent=True)
             task.add_payload("data", domain)
-            task.add_payload("scan_id", scan_id,persistent=True)
+            task.add_payload("scan_id", scan_id, persistent=True)
             task.add_payload("source", "producer")
             producer.send_task(task)
-            logging.info(f"{Fore.GREEN}Starting Scanning {domain} with type {scantype}. Description: {description}")
+            logging.info(
+                f"{Fore.GREEN}Starting Scanning {domain} with type {scantype}. Description: {description}"
+            )
 
         else:
             logging.info(f"{Fore.RED}Error at starting the scan")
     else:
         logging.info(f"{Fore.RED}Domain already exists")
     # Scan logic here
+
 
 # Example report function
 def generate_report(domain, output=None):
@@ -273,8 +376,8 @@ def generate_report(domain, output=None):
             return base_path
 
         # Get directory and basename
-        dir_path = os.path.dirname(base_path.rstrip('/'))
-        base_name = os.path.basename(base_path.rstrip('/'))
+        dir_path = os.path.dirname(base_path.rstrip("/"))
+        base_name = os.path.basename(base_path.rstrip("/"))
 
         # Add timestamp to create unique path
         timestamp = int(time.time())
@@ -284,17 +387,17 @@ def generate_report(domain, output=None):
 
     def save_json_data(data, output_path):
         """Save data as formatted JSON file."""
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             json.dump(data, indent=4, fp=f)
 
     def save_text_data(data, output_path):
         """Save data as text file with newline separation."""
-        with open(output_path, 'w') as f:
-            f.write('\n'.join(data))
+        with open(output_path, "w") as f:
+            f.write("\n".join(data))
 
     def save_binary_data(data, output_path):
         """Save binary data to file."""
-        with open(output_path, 'wb') as f:
+        with open(output_path, "wb") as f:
             f.write(data)
 
     def process_paths_data(paths):
@@ -315,17 +418,10 @@ def generate_report(domain, output=None):
         Returns:
             dict: Dictionary containing processed JS vulnerabilities and links
         """
-        js_vulns = [
-            {"url": entry["url"], "Vulns": entry["Vulns"]}
-            for entry in js_data
-            if entry["Vulns"]
-        ]
+        js_vulns = [{"url": entry["url"], "Vulns": entry["Vulns"]} for entry in js_data if entry["Vulns"]]
         js_links = [entry["url"] for entry in js_data]
 
-        return {
-            'vulns': js_vulns,
-            'links': js_links
-        }
+        return {"vulns": js_vulns, "links": js_links}
 
     def save_document_data(document, outputfolder, domain=None, db=None):
         """Save document data according to predefined configuration.
@@ -357,44 +453,43 @@ def generate_report(domain, output=None):
         """
         for data_type, config in DATA_HANDLERS.items():
             # Handle tools data specially
-            if config.get('is_tools_data'):
-                tools_data = document.get('data', {})
+            if config.get("is_tools_data"):
+                tools_data = document.get("data", {})
                 for tool_name, tool_data in tools_data.items():
                     output_path = os.path.join(outputfolder, f"{tool_name}.json")
                     save_json_data(tool_data, output_path)
                 continue
 
             # Handle JavaScript data specially
-            if config.get('is_js_data') and db and domain:
-                js_collection = db[config['collection']]
-                js_query = {config['query_field']: domain}
+            if config.get("is_js_data") and db and domain:
+                js_collection = db[config["collection"]]
+                js_query = {config["query_field"]: domain}
                 js_data = list(js_collection.find(js_query))
 
                 if js_data:
                     processed_data = process_js_data(js_data)
 
-                    for file_config in config['files']:
+                    for file_config in config["files"]:
                         # Handle files that should go in specific directories
-                        if 'directory' in file_config:
-                            dir_path = os.path.join(outputfolder, file_config['directory'])
+                        if "directory" in file_config:
+                            dir_path = os.path.join(outputfolder, file_config["directory"])
                             os.makedirs(dir_path, exist_ok=True)
-                            output_path = os.path.join(dir_path, file_config['filename'])
+                            output_path = os.path.join(dir_path, file_config["filename"])
                         else:
-                            output_path = os.path.join(outputfolder, file_config['filename'])
+                            output_path = os.path.join(outputfolder, file_config["filename"])
 
-                        file_data = file_config['processor'](processed_data)
-                        file_config['save_func'](file_data, output_path)
+                        file_data = file_config["processor"](processed_data)
+                        file_config["save_func"](file_data, output_path)
                 continue
 
             # Handle root-level files (like subdomains.txt)
-            if config.get('is_root_level'):
+            if config.get("is_root_level"):
                 data = document.get(data_type, [])
                 if data:
-                    output_path = os.path.join(os.path.dirname(outputfolder.rstrip('/')),
-                                            config['filename'])
-                    if config['processor']:
-                        data = config['processor'](data)
-                    config['save_func'](data, output_path)
+                    output_path = os.path.join(os.path.dirname(outputfolder.rstrip("/")), config["filename"])
+                    if config["processor"]:
+                        data = config["processor"](data)
+                    config["save_func"](data, output_path)
                 continue
 
             # Original handling for other data types
@@ -402,105 +497,81 @@ def generate_report(domain, output=None):
             if not data:
                 continue
 
-            if config.get('is_directory'):
-                dir_path = os.path.join(outputfolder, config['directory'])
+            if config.get("is_directory"):
+                dir_path = os.path.join(outputfolder, config["directory"])
                 os.makedirs(dir_path, exist_ok=True)
 
                 for key in data.keys():
                     output_path = os.path.join(dir_path, f"{key}{config['extension']}")
-                    config['save_func'](data[key], output_path)
+                    config["save_func"](data[key], output_path)
 
-            elif 'files' in config:
-                for file_config in config['files']:
+            elif "files" in config:
+                for file_config in config["files"]:
                     processed_data = data
-                    if file_config['processor']:
-                        processed_data = file_config['processor'](data)
-                    output_path = os.path.join(outputfolder, file_config['filename'])
-                    file_config['save_func'](processed_data, output_path)
+                    if file_config["processor"]:
+                        processed_data = file_config["processor"](data)
+                    output_path = os.path.join(outputfolder, file_config["filename"])
+                    file_config["save_func"](processed_data, output_path)
 
             else:
                 processed_data = data
-                if config['processor']:
-                    processed_data = config['processor'](data)
-                output_path = os.path.join(outputfolder, config['filename'])
-                config['save_func'](processed_data, output_path)
+                if config["processor"]:
+                    processed_data = config["processor"](data)
+                output_path = os.path.join(outputfolder, config["filename"])
+                config["save_func"](processed_data, output_path)
 
     # Configuration dictionary defining how to handle each data type
     DATA_HANDLERS = {
-        'Ports': {
-            'filename': 'ports.json',
-            'save_func': save_json_data,
-            'processor': None
+        "Ports": {"filename": "ports.json", "save_func": save_json_data, "processor": None},
+        "Technology": {"filename": "technology.json", "save_func": save_json_data, "processor": None},
+        "Vulns": {
+            "directory": "vulns",
+            "extension": ".json",
+            "save_func": save_json_data,
+            "processor": None,
+            "is_directory": True,
         },
-        'Technology': {
-            'filename': 'technology.json',
-            'save_func': save_json_data,
-            'processor': None
-        },
-        'Vulns': {
-            'directory': 'vulns',
-            'extension': '.json',
-            'save_func': save_json_data,
-            'processor': None,
-            'is_directory': True
-        },
-        'Paths': {
-            'files': [
-                {
-                    'filename': 'dirsearch.json',
-                    'save_func': save_json_data,
-                    'processor': None
-                },
-                {
-                    'filename': 'dirsearch.txt',
-                    'save_func': save_text_data,
-                    'processor': process_paths_data
-                }
+        "Paths": {
+            "files": [
+                {"filename": "dirsearch.json", "save_func": save_json_data, "processor": None},
+                {"filename": "dirsearch.txt", "save_func": save_text_data, "processor": process_paths_data},
             ]
         },
-        'Paths403': {
-            'filename': 'paths403.txt',
-            'save_func': save_text_data,
-            'processor': process_paths403_data
+        "Paths403": {
+            "filename": "paths403.txt",
+            "save_func": save_text_data,
+            "processor": process_paths403_data,
         },
-        'Screenshot': {
-            'filename': 'screenshot.png',
-            'save_func': save_binary_data,
-            'processor': None
+        "Screenshot": {"filename": "screenshot.png", "save_func": save_binary_data, "processor": None},
+        "ToolsData": {
+            "is_tools_data": True,  # Special flag for tools data handling
+            "save_func": save_json_data,
+            "processor": None,
         },
-        'ToolsData': {
-            'is_tools_data': True,  # Special flag for tools data handling
-            'save_func': save_json_data,
-            'processor': None
-        },
-        'JavaScript': {
-            'files': [
+        "JavaScript": {
+            "files": [
                 {
-                    'filename': 'js_vulns.json',
-                    'save_func': save_json_data,
-                    'processor': lambda x: x['vulns'],
-                    'directory': 'vulns'  # Specify vulns directory for js vulns
+                    "filename": "js_vulns.json",
+                    "save_func": save_json_data,
+                    "processor": lambda x: x["vulns"],
+                    "directory": "vulns",  # Specify vulns directory for js vulns
                 },
-                {
-                    'filename': 'js_links.txt',
-                    'save_func': save_text_data,
-                    'processor': lambda x: x['links']
-                }
+                {"filename": "js_links.txt", "save_func": save_text_data, "processor": lambda x: x["links"]},
             ],
-            'is_js_data': True,  # Special flag for JS data handling
-            'collection': 'js',  # MongoDB collection name
-            'query_field': 'domain'  # Field to query by
+            "is_js_data": True,  # Special flag for JS data handling
+            "collection": "js",  # MongoDB collection name
+            "query_field": "domain",  # Field to query by
         },
-        'Subdomains': {
-            'filename': 'subdomains.txt',
-            'save_func': save_text_data,
-            'processor': None,
-            'is_root_level': True  # Flag for root-level files
-        }
+        "Subdomains": {
+            "filename": "subdomains.txt",
+            "save_func": save_text_data,
+            "processor": None,
+            "is_root_level": True,  # Flag for root-level files
+        },
     }
 
-    domain = re.sub(r'^https?://', '', domain)
-    domain = domain.rstrip('/')
+    domain = re.sub(r"^https?://", "", domain)
+    domain = domain.rstrip("/")
     output = output if output else os.path.join("/tmp", f"{domain}_report")
     output = get_output_path(output)
 
@@ -515,10 +586,12 @@ def generate_report(domain, output=None):
     query = {"Domain": domain}
     scan = collection.find_one(query)
     if scan:
-        scan_id=str(scan["_id"])
+        scan_id = str(scan["_id"])
         scantype = scan.get("Type", "Unknown")
         description = scan.get("Description", "No description available")
-        logging.info(f"{Fore.GREEN}Domain: {scan['Domain']}, Scantype: {scantype}, Description: {description}")
+        logging.info(
+            f"{Fore.GREEN}Domain: {scan['Domain']}, Scantype: {scantype}, Description: {description}"
+        )
     else:
         logging.error(f"{Fore.RED}Scan not found")
         exit()
@@ -528,55 +601,59 @@ def generate_report(domain, output=None):
 
     # Check the count of documents
     document_count = len(documents)
-    if document_count== 0:
-
+    if document_count == 0:
         logging.error(f"{Fore.RED}No domains found")
         exit()
     logging.info(f"{Fore.MAGENTA}Found {document_count} domains")
     processing_domains = [document["Domain"] for document in documents if document["status"]["processing"]]
     processing_domains = ",".join(processing_domains) if processing_domains else ""
     for document in documents:
-
         failed_tasks = ",".join(document["status"]["failed"]) if document["status"]["failed"] else ""
         if failed_tasks:
-            failed=document["status"]["failed"]
+            failed = document["status"]["failed"]
             logging.info(f"{Fore.RED}{document['Domain']} has {len(failed)} failed tasks {failed_tasks}")
-        processing_tasks = ",".join(document["status"]["processing"]) if document["status"]["processing"] else ""
+        processing_tasks = (
+            ",".join(document["status"]["processing"]) if document["status"]["processing"] else ""
+        )
         if processing_tasks:
-            processing=document["status"]["processing"]
-            logging.info(f"{Fore.BLUE}{document['Domain']} has {len(processing)} prcoessing tasks {processing_tasks}")
+            processing = document["status"]["processing"]
+            logging.info(
+                f"{Fore.BLUE}{document['Domain']} has {len(processing)} prcoessing tasks {processing_tasks}"
+            )
 
     if processing_domains:
-        response = input(f"{Fore.YELLOW}Some domains are still processing ({processing_domains}), do you want to continue? [y/N]: ")
+        response = input(
+            f"{Fore.YELLOW}Some domains are still processing ({processing_domains}), do you want to continue? [y/N]: "
+        )
         if response.lower() != "y":
             logging.error(f"{Fore.RED}Aborting")
             exit()
-    files=get_files_names()
-    subdomains=[]
+    files = get_files_names()
+    subdomains = []
     for document in documents:
         subdomains.append(document["Domain"])
         if document["active"]:
-
-            domain=document["Domain"]
+            domain = document["Domain"]
             logging.info(f"{Fore.MAGENTA}Creating report for domain {domain}")
 
-            outputfolder=os.path.join(output, domain)
+            outputfolder = os.path.join(output, domain)
             if not os.path.exists(f"{outputfolder}"):
                 os.makedirs(f"{outputfolder}")
 
             domain_files = [filename for filename in files if domain in filename]
 
             for i in domain_files:
-                data=s3.get_object(Bucket="bhunters", Key=i)["Body"]
-                foldername=i.split("_")[0]
-                outputfoldertool=os.path.join(outputfolder,foldername)
+                data = s3.get_object(Bucket="bhunters", Key=i)["Body"]
+                foldername = i.split("_")[0]
+                outputfoldertool = os.path.join(outputfolder, foldername)
                 if not os.path.exists(f"{outputfoldertool}"):
                     os.makedirs(f"{outputfoldertool}")
-                outputfile=os.path.join(outputfoldertool,"_".join(i.split("_")[1:])+".txt")
+                outputfile = os.path.join(outputfoldertool, "_".join(i.split("_")[1:]) + ".txt")
                 with open(outputfile, "wb") as f:
                     f.write(data.read())
 
             save_document_data(document, outputfolder, domain=domain, db=db)
+
 
 def status_report():
     """Display status information for all available system modules.
@@ -610,9 +687,9 @@ def status_report():
     for toolname in tools:
         queue = state.queues[toolname]
         status = {
-            'online_count': queue.online_consumers_count,
-            'pending': len(queue.pending_tasks),
-            'crashed': len(queue.crashed_tasks)
+            "online_count": queue.online_consumers_count,
+            "pending": len(queue.pending_tasks),
+            "crashed": len(queue.crashed_tasks),
         }
 
         # Format the status message
@@ -624,8 +701,9 @@ def status_report():
         )
 
         # Use colorama's Fore for color selection
-        color = Fore.RED if status['online_count'] == 0 else Fore.BLUE
+        color = Fore.RED if status["online_count"] == 0 else Fore.BLUE
         logging.info(f"{color}{status_msg}{Style.RESET_ALL}")
+
 
 def restart_stuck_tasks():
     """
@@ -660,8 +738,7 @@ def restart_stuck_tasks():
             continue
 
         # Count started tasks in a single pass
-        started_tasks = sum(1 for task in pending_tasks
-                          if "started" in str(task.status).lower())
+        started_tasks = sum(1 for task in pending_tasks if "started" in str(task.status).lower())
 
         current_time = datetime.datetime.now().timestamp()
 
@@ -672,13 +749,9 @@ def restart_stuck_tasks():
             # Restart task if:
             # 1. No tasks are started and this task is stuck
             # 2. Task is in started state and stuck
-            if ((started_tasks == 0 or is_started) and
-                minutes_inactive > STUCK_TASK_TIMEOUT_MINUTES):
+            if (started_tasks == 0 or is_started) and minutes_inactive > STUCK_TASK_TIMEOUT_MINUTES:
                 logging.info(f"Restarting stuck task: {task.uid} for tool: {toolname}")
                 producer.backend.restart_task(task)
-
-
-
 
 
 # ----------------------------------------------------------------------
@@ -795,25 +868,27 @@ def _admin(args):
 
     services = _platform_services()
 
-    if args.admin_command == 'init-db':
+    if args.admin_command == "init-db":
         logging.info(f"{Fore.GREEN}Database indexes are up to date.")
         return 0
 
-    if args.admin_command == 'seed-roles':
+    if args.admin_command == "seed-roles":
         from b_hunters.platform.agents.roles import default_role_definitions
 
         created = 0
         for definition in default_role_definitions():
-            existing = services.agent_definitions.get_by_role_and_name(
-                definition["name"], definition["role"]
-            ) if hasattr(services.agent_definitions, "get_by_role_and_name") else None
+            existing = (
+                services.agent_definitions.get_by_role_and_name(definition["name"], definition["role"])
+                if hasattr(services.agent_definitions, "get_by_role_and_name")
+                else None
+            )
             if existing is None:
                 services.agent_definitions.create(definition)
                 created += 1
         logging.info(f"{Fore.GREEN}Seeded {created} agent definition(s).")
         return 0
 
-    if args.admin_command == 'add-provider':
+    if args.admin_command == "add-provider":
         from b_hunters.platform.agents.provider import ProviderConfig
 
         api_key = args.api_key
@@ -843,13 +918,10 @@ def _admin(args):
             target_id=args.name,
             detail={"base_url": args.base_url, "model": args.model},
         )
-        logging.info(
-            f"{Fore.GREEN}Configured the provider '{args.name}' "
-            f"({args.model} at {args.base_url})."
-        )
+        logging.info(f"{Fore.GREEN}Configured the provider '{args.name}' ({args.model} at {args.base_url}).")
         return 0
 
-    if args.admin_command == 'list-providers':
+    if args.admin_command == "list-providers":
         providers = services.providers.list()
         if not providers:
             logging.info(f"{Fore.YELLOW}No model provider is configured.")
@@ -858,13 +930,12 @@ def _admin(args):
             public = services.providers.public(provider)
             models = ", ".join(f"{k}={v}" for k, v in (public.get("role_models") or {}).items())
             logging.info(
-                f"{Fore.CYAN}{public['name']:<20} {public.get('model',''):<24} "
-                f"{public.get('base_url','')}"
-                + (f"  roles: {models}" if models else "")
+                f"{Fore.CYAN}{public['name']:<20} {public.get('model', ''):<24} "
+                f"{public.get('base_url', '')}" + (f"  roles: {models}" if models else "")
             )
         return 0
 
-    if args.admin_command == 'check-provider':
+    if args.admin_command == "check-provider":
         import asyncio
 
         from b_hunters.platform.agents.provider import Provider, ProviderConfig
@@ -903,7 +974,7 @@ def _admin(args):
 
         return asyncio.run(_check())
 
-    if args.admin_command == 'migrate-secrets':
+    if args.admin_command == "migrate-secrets":
         from b_hunters.platform.db.repositories import migrate_provider_secrets
 
         try:
@@ -914,7 +985,7 @@ def _admin(args):
         logging.info(f"{Fore.GREEN}Encrypted {migrated} stored credential(s).")
         return 0
 
-    if args.admin_command == 'migrate-issues':
+    if args.admin_command == "migrate-issues":
         findings = services.db.collection("platform_findings")
         linked = 0
         for document in findings.find({"issue_id": {"$exists": False}}):
@@ -933,7 +1004,7 @@ def _admin(args):
         logging.info(f"{Fore.GREEN}Linked {linked} finding(s) to a durable issue.")
         return 0
 
-    if args.admin_command == 'set-password':
+    if args.admin_command == "set-password":
         password = args.password or os.environ.get("BHUNTERS_BOOTSTRAP_PASSWORD")
         if not password:
             import getpass
@@ -963,10 +1034,10 @@ def _admin(args):
         logging.info(f"{Fore.GREEN}The password of '{args.username}' has been changed.")
         return 0
 
-    if args.admin_command == 'rotate-key':
+    if args.admin_command == "rotate-key":
         return _rotate_key(args, services)
 
-    if args.admin_command == 'list-users':
+    if args.admin_command == "list-users":
         users = services.users.list_users()
         if not users:
             logging.info(f"{Fore.YELLOW}No users exist yet.")
@@ -974,12 +1045,11 @@ def _admin(args):
         for user in users:
             public = services.users.public(user)
             logging.info(
-                f"{Fore.CYAN}{public['username']:<24} {public['role']:<10} "
-                f"active={public['active']}"
+                f"{Fore.CYAN}{public['username']:<24} {public['role']:<10} active={public['active']}"
             )
         return 0
 
-    if args.admin_command in {'bootstrap', 'add-user'}:
+    if args.admin_command in {"bootstrap", "add-user"}:
         username = args.username
         password = args.password
         if not password:
@@ -999,9 +1069,7 @@ def _admin(args):
             return 1
         role = "admin" if args.admin_command == "bootstrap" else args.role
         try:
-            user = services.users.create(
-                username=username, password=password, role=role
-            )
+            user = services.users.create(username=username, password=password, role=role)
         except Exception as exc:
             logging.error(f"{Fore.RED}Could not create the user: {exc}")
             return 1
@@ -1035,14 +1103,10 @@ def _runner(args):
         return _runner_status(services)
 
     config = RunnerConfig(
-        concurrency=(
-            args.concurrency if args.concurrency is not None else settings.runner_concurrency
-        ),
+        concurrency=(args.concurrency if args.concurrency is not None else settings.runner_concurrency),
         lease_seconds=settings.runner_lease_seconds,
         heartbeat_seconds=settings.runner_heartbeat_seconds,
-        poll_seconds=(
-            args.poll_seconds if args.poll_seconds is not None else settings.runner_poll_seconds
-        ),
+        poll_seconds=(args.poll_seconds if args.poll_seconds is not None else settings.runner_poll_seconds),
         shutdown_grace_seconds=settings.runner_shutdown_grace_seconds,
     )
     runner = Runner(services, config)
@@ -1073,13 +1137,43 @@ def _runner(args):
     return 0
 
 
+def _ci(args) -> int:
+    """Scan from a pipeline.
+
+    The exit code is what the pipeline acts on: zero when nothing was
+    found at or above the threshold, one when there was.
+    """
+    from b_hunters.platform.ci import ci_scan
+    from b_hunters.platform.settings import get_settings
+
+    settings = get_settings()
+    base_url = args.base_url or f"http://{settings.host}:{settings.port}/api/v1"
+    token = args.token or os.environ.get("BHUNTERS_API_TOKEN", "")
+    if not token:
+        logging.error(
+            "No API token: pass --token or set BHUNTERS_API_TOKEN. "
+            "Create one with: b-hunters admin create-token"
+        )
+        return 2
+
+    code = ci_scan(
+        target=args.target,
+        base_url=base_url,
+        token=token,
+        wait=args.wait,
+        fail_on="" if args.fail_on == "none" else args.fail_on,
+        profile=args.profile,
+        timeout_seconds=args.timeout,
+        log=lambda line: logging.info(line),
+    )
+    return code
+
+
 def _runner_status(services):
     """Report the state of the runner."""
     from b_hunters.platform.runner import HEARTBEAT_MAX_AGE_SECONDS
 
-    document = services.db.collection("platform_runner_heartbeats").find_one(
-        sort=[("last_seen_at", -1)]
-    )
+    document = services.db.collection("platform_runner_heartbeats").find_one(sort=[("last_seen_at", -1)])
     if not document:
         logging.error(f"{Fore.RED}No runner has reported a heartbeat yet.")
         return 1
@@ -1103,42 +1197,40 @@ def _bench(args):
     services = _platform_services()
     lab = LabManager()
 
-    if args.bench_command == 'sync':
+    if args.bench_command == "sync":
         for manifest in default_manifests():
             services.db.collection("platform_benchmarks").update_one(
                 {"slug": manifest.slug}, {"$set": manifest.to_dict()}, upsert=True
             )
-        logging.info(
-            f"{Fore.GREEN}Synced {len(default_manifests())} benchmark manifest(s)."
-        )
+        logging.info(f"{Fore.GREEN}Synced {len(default_manifests())} benchmark manifest(s).")
         return 0
 
-    if args.bench_command == 'lab':
-        applications = [a.strip() for a in args.applications.split(',') if a.strip()]
-        if args.action == 'up':
+    if args.bench_command == "lab":
+        applications = [a.strip() for a in args.applications.split(",") if a.strip()]
+        if args.action == "up":
             try:
                 result = lab.up(applications or None)
             except Exception as exc:
                 logging.error(f"{Fore.RED}{exc}")
                 return 1
             logging.info(f"{Fore.GREEN}Laboratory started: {result}")
-        elif args.action == 'down':
+        elif args.action == "down":
             logging.info(f"{Fore.GREEN}Laboratory stopped: {lab.down()}")
         else:
             status = lab.status()
             logging.info(f"{Fore.CYAN}Laboratory running: {status.running}")
             for application in status.applications:
                 logging.info(
-                    f"  {application.get('slug')}: {application.get('state')} {application.get('status','')}"
+                    f"  {application.get('slug')}: {application.get('state')} {application.get('status', '')}"
                 )
         return 0
 
-    if args.bench_command == 'run':
+    if args.bench_command == "run":
         import asyncio
 
         from b_hunters.platform.bench.runner import BenchmarkRunConfig, BenchmarkRunner
 
-        applications = [a.strip() for a in args.applications.split(',') if a.strip()]
+        applications = [a.strip() for a in args.applications.split(",") if a.strip()]
         if args.start_lab:
             try:
                 lab.up(applications or None)
@@ -1153,6 +1245,7 @@ def _bench(args):
             worker_collector = None
             worker_runner = _build_worker_runner(services)
             if worker_runner is not None:
+
                 def collect(**kwargs):
                     return worker_runner.run(**kwargs)
 
@@ -1282,12 +1375,9 @@ def _bench(args):
         print(json.dumps(outcome["summary"]["score"], indent=2))
         return 0
 
-    if args.bench_command == 'scores':
+    if args.bench_command == "scores":
         runs = list(
-            services.db.collection("platform_benchmark_runs")
-            .find({})
-            .sort("started_at", -1)
-            .limit(20)
+            services.db.collection("platform_benchmark_runs").find({}).sort("started_at", -1).limit(20)
         )
         if not runs:
             logging.info(f"{Fore.YELLOW}No benchmark runs have been recorded yet.")
@@ -1295,15 +1385,11 @@ def _bench(args):
         from b_hunters.platform.bench.scoring import summarise_for_humans
 
         for run in runs:
-            logging.info(
-                f"{Fore.CYAN}run {run.get('run_id')} ({run.get('started_at')})"
-            )
+            logging.info(f"{Fore.CYAN}run {run.get('run_id')} ({run.get('started_at')})")
             logging.info(summarise_for_humans(run.get("summary", {})))
         return 0
 
     return 1
-
-
 
 
 def _contracts(args):
@@ -1320,9 +1406,7 @@ def _contracts(args):
     repositories = [
         directory
         for directory in sorted(root.iterdir())
-        if directory.is_dir()
-        and directory.name != "B-Hunters"
-        and any(directory.glob("*/*.py"))
+        if directory.is_dir() and directory.name != "B-Hunters" and any(directory.glob("*/*.py"))
     ]
     contracts, findings = verify_repository_set(repositories)
     logging.info(f"{Fore.CYAN}Checked {len(contracts)} worker repositories")
@@ -1347,8 +1431,6 @@ def _contracts(args):
     if not findings:
         logging.info(f"{Fore.GREEN}Every worker agrees on the message contract.")
     return 0
-
-
 
 
 def _build_worker_runner(services):

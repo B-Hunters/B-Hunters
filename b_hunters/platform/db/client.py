@@ -57,6 +57,9 @@ PLATFORM_COLLECTIONS = (
     "platform_issues",
     "platform_issue_events",
     "platform_issue_comments",
+    "platform_api_tokens",
+    "platform_notifications",
+    "platform_notification_deliveries",
     "platform_findings",
     "platform_runner_heartbeats",
     "platform_assets",
@@ -214,6 +217,19 @@ INDEXES: dict[str, list[IndexSpec]] = {
     "platform_issue_comments": [
         IndexSpec([("comment_id", ASCENDING)], "uniq_issue_comment_id", unique=True),
         IndexSpec([("issue_id", ASCENDING), ("created_at", ASCENDING)], "by_issue_created"),
+    ],
+    "platform_api_tokens": [
+        IndexSpec([("token_id", ASCENDING)], "uniq_api_token_id", unique=True),
+        IndexSpec([("token_hash", ASCENDING)], "uniq_api_token_hash", unique=True),
+        IndexSpec([("user_id", ASCENDING)], "by_api_token_user"),
+    ],
+    "platform_notifications": [
+        IndexSpec([("notification_id", ASCENDING)], "uniq_notification_id", unique=True),
+        IndexSpec([("events", ASCENDING)], "by_notification_event"),
+    ],
+    "platform_notification_deliveries": [
+        IndexSpec([("delivery_id", ASCENDING)], "uniq_delivery_id", unique=True),
+        IndexSpec([("notification_id", ASCENDING), ("at", DESCENDING)], "by_delivery_at"),
     ],
     "platform_runner_heartbeats": [
         IndexSpec([("runner_id", ASCENDING)], "uniq_runner_id", unique=True),

@@ -29,6 +29,7 @@ from urllib.parse import urljoin, urlsplit
 from ..assets import classify, is_external, normalise_url
 from ..db.assets import AssetRepository, WorkerRunRepository
 from ..db.client import Database
+from ..db.notifications import NOTIFICATION_EVENTS, NotificationRepository
 from ..db.repositories import (
     AgentStateRepository,
     EventRepository,
@@ -485,6 +486,8 @@ class ScanOrchestrator:
         self.assets = AssetRepository(database)
         #: What every worker did in this scan.
         self.worker_runs = WorkerRunRepository(database)
+        #: The webhooks the operator asked to be told about.
+        self.notifications = NotificationRepository(database)
         self.provider_factory = provider_factory
         self.tool_registry = tool_registry or ToolRegistry()
         self.scanner_registry = scanner_registry or AdapterRegistry()
@@ -512,6 +515,30 @@ class ScanOrchestrator:
             self.events.append(scan_id=scan_id, kind=kind, payload=payload, actor=actor)
         except Exception:  # pragma: no cover - persistence must not break a scan
             log.exception("failed to persist a scan event")
+        self._notify(scan_id, kind, payload)
+
+    def _notify(self, scan_id: str, kind: str, payload: dict[str, Any]) -> None:
+        """Tell the webhooks about an event.
+
+        The delivery happens in the background: a webhook that is slow
+        must not hold a scan up, and a webhook that is down must not
+        break one.
+        """
+        if kind not in NOTIFICATION_EVENTS:
+            return
+        body = {"scan_id": scan_id, **payload}
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:  # pragma: no cover - not in an event loop
+            return
+        loop.create_task(self._deliver_notifications(kind, body))
+
+    async def _deliver_notifications(self, kind: str, body: dict[str, Any]) -> None:
+        """Deliver an event to every notification that wants it."""
+        try:
+            await asyncio.to_thread(self.notifications.notify, kind, body)
+        except Exception:  # pragma: no cover - a webhook that is down
+            log.exception("could not deliver the notification for %s", kind)
 
     def _audit_tool_call(self, record: dict[str, Any]) -> None:
         """Record one tool call.
@@ -853,10 +880,15 @@ class ScanOrchestrator:
         # every one of them had a name.
         self._write_integrity(context.scan_id)
         self.scans.set_status(context.scan_id, "completed")
+        counts = self.findings.severity_counts(context.scan_id)
         self._emit(
             context.scan_id,
             "scan.completed",
-            {"duration_seconds": duration, "findings": self.findings.count(context.scan_id)},
+            {
+                "duration_seconds": duration,
+                "findings": self.findings.count(context.scan_id),
+                "severity_counts": counts,
+            },
         )
         return {"status": "completed", "duration_seconds": duration}
 
@@ -1384,11 +1416,33 @@ class ScanOrchestrator:
                 versions[identity] = str(spec.version)
         return versions
 
+    def _store_finding(self, scan_id: str, **fields: Any) -> dict[str, Any]:
+        """Store one finding and tell the webhooks about the bad ones.
+
+        A critical or a high finding is the thing an operator wants to
+        hear about while it is happening, not an hour later when the
+        report is read.
+        """
+        document, _created = self.findings.upsert(scan_id=scan_id, **fields)
+        severity = str(fields.get("severity", "") or "").lower()
+        if severity in {"critical", "high"}:
+            self._emit(
+                scan_id,
+                f"finding.{severity}",
+                {
+                    "title": str(fields.get("title", "")),
+                    "severity": severity,
+                    "vuln_class": str(fields.get("vuln_class", "")),
+                    "affected_url": str(fields.get("affected_url", "")),
+                },
+            )
+        return document
+
     def _persist_worker_results(self, context: ScanContext, target: Any, outcome: Any) -> None:
         """Turn the worker output into platform findings and services."""
         for finding in outcome.findings:
             mapped = finding_for_platform(finding, target)
-            self.findings.upsert(
+            self._store_finding(
                 scan_id=context.scan_id,
                 title=mapped["title"],
                 summary=mapped["summary"],
@@ -1508,7 +1562,7 @@ class ScanOrchestrator:
                 for finding in findings:
                     if not isinstance(finding, dict):
                         continue
-                    self.findings.upsert(
+                    self._store_finding(
                         scan_id=context.scan_id,
                         title=finding.get("title", "scanner finding"),
                         summary=finding.get("summary", ""),
@@ -2102,7 +2156,7 @@ class ScanOrchestrator:
 
         default_host = self._default_host(context)
         for finding in parse_findings(findings, role=role, task_id=task_id):
-            self.findings.upsert(
+            self._store_finding(
                 scan_id=context.scan_id,
                 title=finding.title,
                 summary=finding.summary,
