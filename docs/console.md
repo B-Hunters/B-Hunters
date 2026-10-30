@@ -31,6 +31,7 @@ b_hunters/web/
 | `#/new-scan` | The scan form |
 | `#/scans/{id}` | One scan, with its tabs |
 | `#/findings` | Every finding, with a filter by what detected it |
+| `#/issues` | The durable issues, with their triage state, their history and their comments |
 | `#/agents` | The agent roles and their definitions |
 | `#/karton` | The task router: the queues, the workers, the crashed tasks |
 | `#/benchmarks` | The benchmark scores |
@@ -52,6 +53,28 @@ b_hunters/web/
 | JS | The JavaScript files the target serves |
 | Images | The images the target serves |
 | Findings | The findings of the scan, filterable by what found them |
+
+## The issues
+
+A finding belongs to the scan that found it. An **issue** is the durable
+thing behind it: it carries the triage state, the observation state and
+the history, and it is what the operator works on.
+
+The `#/issues` view lists them, filters them by state, and opens one
+with its history and its comments. From there the operator can:
+
+* set the state — open, in progress, fixed, risk accepted, a false
+  positive, a duplicate — and the owner;
+* comment on it, with a record of who said what;
+* read the history: every change of state, and when.
+
+The state is set on the **issue**, not on the occurrence, so a problem
+found by a later scan of the same target is the same problem: marking
+it fixed marks it fixed in every scan after that.
+
+An issue that is seen again **reopens**, and the reopen is recorded. A
+fix that did not hold is not a fix, and the operator has to be able to
+see that their fix did not hold.
 
 ## The participation table
 
