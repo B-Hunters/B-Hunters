@@ -168,7 +168,7 @@ services:
       - BHUNTERS_AGENT_MAX_ROUNDS=24
       - BHUNTERS_AGENT_WALL_CLOCK_SECONDS=1800
       - BHUNTERS_AGENT_MAX_ROLES=${BHUNTERS_AGENT_MAX_ROLES:-4}
-      - BHUNTERS_AGENT_JUDGING_BUDGET_SHARE=${BHUNTERS_AGENT_JUDGING_BUDGET_SHARE:-0.3}
+      - BHUNTERS_AGENT_JUDGING_BUDGET_SHARE=${BHUNTERS_AGENT_JUDGING_BUDGET_SHARE:-0.5}
       # The workers and the agents each get half of the scan: the
       # workers produced seven findings in ten minutes and the agent
       # roles found the interesting ones in three.

@@ -178,7 +178,16 @@ class Settings:
     #: judge the findings.  The hypothesis roles stop short of the
     #: deadline so that the roles that give a finding its verdict have
     #: time to give it.
-    agent_judging_budget_share: float = 0.3
+    #: The share of the agent budget that is kept for the roles that
+    #: judge the findings.  The hypothesis roles stop short of the
+    #: deadline so that the roles that give a finding its verdict have
+    #: time to give it.
+    #:
+    #: The adjudicator's rounds scale with the number of findings it
+    #: has to judge — two rounds each — so a scan with many findings
+    #: needs a larger share than one with few.  Half the agent budget
+    #: is what the measurement needs for a handful of findings.
+    agent_judging_budget_share: float = 0.5
     #: How many agent roles a scan runs.  Zero means every role the
     #: profile names.
     #:
