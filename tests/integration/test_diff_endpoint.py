@@ -49,9 +49,7 @@ def test_two_scans_are_compared_when_they_asked_the_same_question(client, csrf, 
     services.scans.update(first, {"status": "completed", "phase": "completed"})
     services.scans.update(second, {"status": "completed", "phase": "completed"})
 
-    response = client.get(
-        f"/api/v1/scans/{second}/diff?against={first}", headers={"X-CSRF-Token": csrf}
-    )
+    response = client.get(f"/api/v1/scans/{second}/diff?against={first}", headers={"X-CSRF-Token": csrf})
 
     assert response.status_code == 200
     payload = response.json()
