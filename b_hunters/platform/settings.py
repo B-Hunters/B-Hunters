@@ -167,6 +167,11 @@ class Settings:
     #: each, and the adjudicator judges the findings anyway, so it is off
     #: unless it is asked for.  A scan that names the role still gets it.
     agent_verification_enabled: bool = False
+    #: The share of the agent budget that is kept for the roles that
+    #: judge the findings.  The hypothesis roles stop short of the
+    #: deadline so that the roles that give a finding its verdict have
+    #: time to give it.
+    agent_judging_budget_share: float = 0.3
 
     # --- scope enforcement defaults ----------------------------------------
     scope_allow_private_network: bool = False
@@ -290,6 +295,7 @@ def load_settings(
                 "llm_concurrency",
                 "agent_max_rounds",
                 "agent_max_tokens_per_scan",
+                "agent_judging_budget_share",
                 "agent_max_task_budget",
                 "agent_wall_clock_seconds",
                 "agent_max_tokens_per_task",

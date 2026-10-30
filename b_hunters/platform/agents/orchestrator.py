@@ -96,6 +96,31 @@ REPORTING_ROLES = ("adjudicator",)
 #: left to do.
 SCAN_PHASES = ("workers", "agents", "verifying", "reporting", "completed")
 
+#: The order the hypothesis roles start in.
+#:
+#: A scan has a budget and the roles compete for it.  When twelve roles
+#: are planned at once, the budget is gone before the last of them
+#: starts, and the ones that never ran are recorded as cut off.  The
+#: order decides which work happens: the surface first, then the
+#: weaknesses of that surface.
+ROLE_PRIORITY = (
+    "recon",
+    "javascript",
+    "api",
+    "authn",
+    "access_control",
+    "vuln_injection",
+    "vuln_xss",
+    "vuln_ssrf",
+    "vuln_config",
+    "source_analysis",
+)
+
+#: The roles that judge the findings rather than look for them.  They
+#: are the ones that give a finding its verdict, and a finding without
+#: a verdict is a guess.
+JUDGING_ROLES = ("verifier", "adjudicator")
+
 #: The adapter that crawls the target.  It runs in the second native
 #: wave: it seeds itself from the URLs the fingerprinters recorded.
 ASSET_CRAWL_ADAPTER = "asset_crawl"
@@ -777,13 +802,22 @@ class ScanOrchestrator:
                     agent_scope = ScopeEnforcer(
                         self._phase_policy(context, 1 - self.settings.worker_phase_share)
                     )
+                stage_deadline = deadline
+                if stage == "agents" and deadline:
+                    # The judging roles run after the hypothesis roles,
+                    # and they are what turn a finding into a verdict.
+                    # The hypothesis roles therefore stop short of the
+                    # deadline, so that the roles that judge have time
+                    # to judge.
+                    reserve = self._judging_reserve(context, deadline)
+                    stage_deadline = max(deadline - reserve, deadline * 0.5)
                 tokens_spent = await self._run_agent_tasks(
                     context,
                     self._tasks_for_stage(plan, stage),
                     agent_scope,
                     state,
                     spent=tokens_spent,
-                    deadline=deadline,
+                    deadline=stage_deadline,
                 )
                 self.scans.set_phase(context.scan_id, self._phase_after(stage))
         except asyncio.CancelledError:
@@ -932,6 +966,15 @@ class ScanOrchestrator:
         if key == "max_rounds":
             return min(role_value, int(override))
         return max(role_value, int(override))
+
+    @staticmethod
+    def _role_rank(role: str) -> int:
+        """Where a role sits in the order the roles start in."""
+        if role in ROLE_PRIORITY:
+            return ROLE_PRIORITY.index(role)
+        # The judging roles come last: they need the findings the
+        # hypothesis roles produce.
+        return len(ROLE_PRIORITY)
 
     def _budget_for_task(self, context: ScanContext, role: Any, task: AgentTask) -> Budget:
         """The budget of one agent task, scaled for a role that judges findings.
@@ -1551,7 +1594,7 @@ class ScanOrchestrator:
                     )
                 break
 
-            ready.sort(key=lambda t: (-len(t.depends_on), t.role))
+            ready.sort(key=lambda t: (-len(t.depends_on), self._role_rank(t.role)))
             batch = ready[: max(1, context.profile.max_concurrency)]
 
             # The scan has a token budget of its own.  It was never
@@ -1769,6 +1812,11 @@ class ScanOrchestrator:
     # ------------------------------------------------------------------
     # Phases
     # ------------------------------------------------------------------
+    def _judging_reserve(self, context: ScanContext, deadline: float) -> float:
+        """The share of the agent budget kept for the judging roles."""
+        total = max(0.0, deadline - time.monotonic())
+        return total * float(self.settings.agent_judging_budget_share)
+
     @staticmethod
     def _stages_from(phase: str) -> list[str]:
         """The stages of a scan that still have to run.
