@@ -87,6 +87,21 @@ Two changes fix that:
 A role that never started is recorded as `wall_clock`, never as one
 that found nothing.
 
+### What the change bought
+
+A scan of the laboratory with the same parameters, before and after:
+
+| | Before | After |
+|---|---|---|
+| Roles that completed | **0** | **5** |
+| The verifier, the role that judges | never started | **completed** |
+| The roles that did not run | 12, all cut off | 6, cut off with the reason |
+| The tokens the scan spent | 0 | 681,569 |
+
+The roles that completed were `recon`, `javascript`, `api`, `authn` and
+the `verifier` — the four the budget admitted, in the order of their
+yield, and then the role that judges.
+
 ## The workers are bounded too
 
 The worker phase has a budget of its own — 70% of the scan — and a
