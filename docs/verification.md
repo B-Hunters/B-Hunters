@@ -127,7 +127,7 @@ at all. The gateway now names the type, and a test pins it.
 
 ## 6. What the runs found in the platform
 
-Six defects that only a live run could show:
+Seven defects that only a live run could show:
 
 1. **Every scan ignored the profile the operator chose.** `ScanProfile`
    had no `to_dict`, so the scan stored an empty profile and the runner
@@ -150,6 +150,41 @@ Six defects that only a live run could show:
    by itself, and a scan that finds its target gone says so.
 6. **Two identities with the same name could collide**, because the
    identifier was derived from the name and the millisecond.
+7. **Only the first missing security header was ever reported.** The
+   fingerprint of a finding is its class, host, path and parameter, so
+   the four missing headers of one target had the same fingerprint and
+   the repository merged them into one. Juice Shop was missing CSP,
+   HSTS, Referrer-Policy and Permissions-Policy; the platform reported
+   HSTS and said nothing about the other three. The header findings now
+   carry the name of the header, and a scan of the same target reports
+   **four** findings where it reported one.
+
+## 6a. Against the benchmark's own expectations
+
+Scored with the benchmark's own rule — the vulnerability class must
+match and one of the expected evidence markers must be present:
+
+| Application | Known | Detected | Missed |
+|---|---|---|---|
+| DVGA | 8 | introspection, destructive mutations, unauthenticated users | the SQL injection's *evidence*, the header case, and three the benchmark itself marks unsupported |
+| Juice Shop | 7 | CSP, HSTS, Referrer-Policy | the SQL injection, the JavaScript API surface, the challenge catalogue, and one the benchmark marks unsupported |
+| WebGoat | 6 | HSTS | CSP, X-Frame-Options, route discovery, and two the benchmark marks unsupported |
+
+Three of the six applications' "misses" are not misses of detection
+but of **taxonomy**: the agent roles write their class in their own
+words — `"CWE-1021 (Clickjacking)"` where the benchmark expects
+`security_misconfiguration` — and the benchmark compares the class
+exactly. The WebGoat run of 2026-10-28 reported *"No X-Frame-Options /
+frame-ancestors protection — application is clickjackable"* and the
+benchmark scored it as missed, because the class was spelled
+differently.
+
+Six of the benchmark's own cases are marked **unsupported**: they need
+a session the benchmark does not create (WebGoat's XSS and SQLi
+lessons, Juice Shop's basket IDOR) or they describe a flaw the current
+version does not have (DVGA's REST surface, its SSRF endpoint, and its
+stored XSS). **Nothing can find those without logging in**, which is
+what the identity vault and the login recorder are for.
 
 ## 7. The pass criteria
 
