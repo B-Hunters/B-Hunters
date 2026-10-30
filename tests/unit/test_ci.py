@@ -136,6 +136,46 @@ def test_the_command_creates_and_starts_the_scan():
     assert ("POST", "/scans/s1/start") in platform.calls
 
 
+def test_the_scan_carries_the_scope():
+    """A private target is refused unless the caller says it is a test."""
+    bodies = []
+
+    def platform(method, path, body=None):
+        if body is not None:
+            bodies.append(body)
+        return _Fake()(method, path, body)
+
+    ci_scan(
+        target="http://172.25.0.13:3000/",
+        token="t",
+        request=platform,
+        log=lambda line: None,
+    )
+
+    assert bodies
+    assert bodies[0]["test_environment"] is False
+    assert bodies[0]["targets"]["authorized_hosts"] == ["172.25.0.13"]
+
+
+def test_a_test_environment_is_declared():
+    bodies = []
+
+    def platform(method, path, body=None):
+        if body is not None:
+            bodies.append(body)
+        return _Fake()(method, path, body)
+
+    ci_scan(
+        target="http://172.25.0.13:3000/",
+        token="t",
+        test_environment=True,
+        request=platform,
+        log=lambda line: None,
+    )
+
+    assert bodies[0]["test_environment"] is True
+
+
 def test_the_command_does_not_wait_when_it_is_told_not_to():
     platform = _Fake()
 

@@ -86,6 +86,7 @@ def ci_scan(
     fail_on: str = "high",
     profile: str = "standard",
     name: str = "",
+    test_environment: bool = False,
     timeout_seconds: int = 3600,
     poll_seconds: float = POLL_SECONDS,
     request: Optional[Callable[..., tuple[int, Any]]] = None,
@@ -107,6 +108,12 @@ def ci_scan(
             "description": "a scan started from the command line",
             "targets": {"urls": [target], "authorized_hosts": [_host_of(target)]},
             "profile": profile,
+            # The scope.  A target on a private network — a laboratory,
+            # an internal service — is refused unless the caller says
+            # that the target is a test environment, and then it is
+            # allowed.  The flag is the operator's to set, not the
+            # command's to assume.
+            "test_environment": bool(test_environment),
         },
     )
     if status not in (200, 201):

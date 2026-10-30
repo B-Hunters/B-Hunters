@@ -239,6 +239,11 @@ $$$$$$$  |        $$ |  $$ |\$$$$$$  |$$ |  $$ | \$$$$  |\$$$$$$$\ $$ |      $$$
     ci_scan_parser.add_argument(
         "--timeout", type=int, default=3600, help=f"{Fore.YELLOW}How long to wait for the scan"
     )
+    ci_scan_parser.add_argument(
+        "--test-environment",
+        action="store_true",
+        help=f"{Fore.YELLOW}The target is on a private network and is authorised for testing",
+    )
 
     # Runner command
     runner_parser = subparsers.add_parser("runner", help=f"{Fore.CYAN}Run the durable job runner")
@@ -1191,6 +1196,7 @@ def _ci(args) -> int:
         fail_on="" if args.fail_on == "none" else args.fail_on,
         profile=args.profile,
         timeout_seconds=args.timeout,
+        test_environment=args.test_environment,
         log=lambda line: logging.info(line),
     )
     return code
