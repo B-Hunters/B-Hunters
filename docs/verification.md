@@ -179,6 +179,12 @@ frame-ancestors protection — application is clickjackable"* and the
 benchmark scored it as missed, because the class was spelled
 differently.
 
+The scans produced **seventy-eight spellings of about twenty kinds of
+vulnerability**. The class is now normalised when a finding is stored —
+the canonical name is stored and the original is kept beside it — so
+the same issue is one issue everywhere: in the triage view, in the
+fingerprint and in the score.
+
 Six of the benchmark's own cases are marked **unsupported**: they need
 a session the benchmark does not create (WebGoat's XSS and SQLi
 lessons, Juice Shop's basket IDOR) or they describe a flaw the current
