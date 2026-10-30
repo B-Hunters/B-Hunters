@@ -27,7 +27,7 @@ class _Fake:
         if method == "GET" and path.startswith("/scans/"):
             return 200, {"status": self.status, "scan_id": "s1"}
         if method == "GET" and path.startswith("/findings"):
-            return 200, {"findings": self.findings}
+            return 200, {"items": self.findings, "count": len(self.findings)}
         return 404, {"detail": "not found"}
 
 
@@ -188,6 +188,23 @@ def test_the_command_does_not_wait_when_it_is_told_not_to():
     )
 
     assert not any(path.startswith("/scans/s1") and method == "GET" for method, path in platform.calls)
+
+
+def test_an_answer_the_command_does_not_know_produces_no_findings():
+    """A shape the command does not know must not crash it."""
+    def platform(method, path, body=None):
+        if method == "GET" and path.startswith("/findings"):
+            return 200, {"something": "else"}
+        return _Fake()(method, path, body)
+
+    code = ci_scan(
+        target="https://demo.test/",
+        token="t",
+        request=platform,
+        log=lambda line: None,
+    )
+
+    assert code == 0
 
 
 def test_the_findings_are_printed():

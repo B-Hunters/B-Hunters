@@ -143,8 +143,7 @@ def ci_scan(
         log(f"could not read the findings: {findings.get('detail', findings)}")
         return 2
 
-    rows = findings.get("findings", findings) if isinstance(findings, dict) else findings
-    rows = list(rows or [])
+    rows = _rows(findings)
     for row in rows:
         log(
             f"  [{str(row.get('severity', 'info')):>8}] {str(row.get('title', ''))} "
@@ -176,6 +175,27 @@ def _wait(
             return status, payload
         time.sleep(poll_seconds)
     return 200, {"status": "timeout"}
+
+
+def _rows(payload: Any) -> list[dict[str, Any]]:
+    """The findings of an answer.
+
+    The endpoint returns them under ``items``; the older shape used
+    ``findings``.  Anything that is not a finding is ignored, so a
+    shape the command does not know produces an empty list rather than
+    a crash.
+    """
+    if isinstance(payload, dict):
+        rows = payload.get("items")
+        if rows is None:
+            rows = payload.get("findings")
+    elif isinstance(payload, list):
+        rows = payload
+    else:
+        rows = None
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
 
 
 def _host_of(target: str) -> str:
