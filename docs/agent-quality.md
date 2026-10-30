@@ -102,6 +102,19 @@ The roles that completed were `recon`, `javascript`, `api`, `authn` and
 the `verifier` — the four the budget admitted, in the order of their
 yield, and then the role that judges.
 
+The adjudicator was still cut off, because its cost scales with the
+number of findings — two rounds each — and the reserve gave it less
+than it needed. With a scan of thirty minutes it completes:
+
+| Scan | Roles completed | The adjudicator | Findings judged |
+|---|---|---|---|
+| 15 minutes | 5 | cut off | 0 |
+| 30 minutes | **6** | **completed, 10 rounds** | **7** |
+
+The verdict is worth the time: five of the seven findings came back
+*confirmed* and two came back *rejected* — one of them because it said
+the same thing as another.
+
 ## The workers are bounded too
 
 The worker phase has a budget of its own — 70% of the scan — and a

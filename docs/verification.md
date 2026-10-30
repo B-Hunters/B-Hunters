@@ -125,6 +125,43 @@ exception with an empty message into `"tool 'http_request' failed: "`,
 throwing the exception's type away, so the failure had no explanation
 at all. The gateway now names the type, and a test pins it.
 
+## 5a. The run that judged
+
+The last run of the laboratory — the same target, the same parameters,
+with the budget the judging chain needs — is the first one in which the
+findings carry a verdict:
+
+| Role | Status | Rounds | Tokens |
+|---|---|---|---|
+| `recon` | completed | 5 | 77,621 |
+| `javascript` | completed | 8 | 181,701 |
+| `api` | completed | 7 | 192,007 |
+| `authn` | completed | 9 | 221,423 |
+| `verifier` | completed | 5 | 79,098 |
+| `adjudicator` | completed | 10 | 231,074 |
+| six hypothesis roles | cut off | 0 | 0 |
+
+The verifier concluded *"All 7 candidate findings reproduce against the
+live target (OWASP Juice Shop)"* and the adjudicator *"Reconciliation of
+5 agent roles (recon, api, authn, javascript, verifier)"*.
+
+The findings came back with their verdicts:
+
+| Severity | Verdict | Finding | Raised by |
+|---|---|---|---|
+| low | confirmed | Missing content-security-policy header | `security_headers` |
+| info | confirmed | Missing strict-transport-security header | `security_headers` |
+| info | **rejected** | Technologies identified | `technology` |
+| info | confirmed | Missing permissions-policy header | `security_headers` |
+| medium | confirmed | No HTTPS redirection | `Wapiti` |
+| low | confirmed | Missing referrer-policy header | `security_headers` |
+| low | **rejected** | CSP is not set | `Wapiti` |
+
+The adjudicator rejected two of the seven, and both rejections are
+right: *"Technologies identified"* is an observation rather than a
+vulnerability, and Wapiti's CSP finding says the same thing as the
+platform's own header adapter — the same defect, counted twice.
+
 ## 6. What the runs found in the platform
 
 Seven defects that only a live run could show:
