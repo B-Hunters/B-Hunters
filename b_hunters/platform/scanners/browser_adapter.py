@@ -95,6 +95,13 @@ async def browser_crawl_executor(request: ScanRequest) -> ScanResult:
                 if not child or child in seen:
                     continue
                 seen.add(child)
+                if is_external(child, authorized):
+                    # A reference to another host is recorded and is
+                    # never fetched: the target is not covered by the
+                    # authorised scope, and fetching it would be the
+                    # crawler going somewhere it was not sent.
+                    assets.setdefault(child, _item(child, depth=depth + 1))["scope"] = "external"
+                    continue
                 if depth + 1 <= MAX_DEPTH:
                     queue.append((child, depth + 1))
     except Exception as exc:
