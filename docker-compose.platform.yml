@@ -105,6 +105,12 @@ services:
       # budget are the real limits.
       - BHUNTERS_AGENT_MAX_ROUNDS=24
       - BHUNTERS_AGENT_WALL_CLOCK_SECONDS=1800
+      # A reasoning model spends about 150 seconds and 150,000 tokens on
+      # one role, so twelve roles need nine minutes of agent time on
+      # their own.  The runner runs the four roles that yield the most
+      # and records the rest as cut off, rather than starting twelve roles
+      # and finishing none of them.
+      - BHUNTERS_AGENT_MAX_ROLES=${BHUNTERS_AGENT_MAX_ROLES:-4}
     volumes:
       # The platform names a Karton identity; the workers do not.
       - ./deploy/platform.ini:/etc/b-hunters/b-hunters.ini:ro
@@ -161,6 +167,8 @@ services:
       - BHUNTERS_AGENT_MAX_TOOL_CALLS_PER_TASK=100
       - BHUNTERS_AGENT_MAX_ROUNDS=24
       - BHUNTERS_AGENT_WALL_CLOCK_SECONDS=1800
+      - BHUNTERS_AGENT_MAX_ROLES=${BHUNTERS_AGENT_MAX_ROLES:-4}
+      - BHUNTERS_AGENT_JUDGING_BUDGET_SHARE=${BHUNTERS_AGENT_JUDGING_BUDGET_SHARE:-0.3}
     # The image's entry point is already `b-hunters`, so the command
     # names the subcommand only.
     command: ["runner"]
