@@ -802,6 +802,9 @@ class ScanOrchestrator:
                     agent_scope = ScopeEnforcer(
                         self._phase_policy(context, 1 - self.settings.worker_phase_share)
                     )
+                stage_tasks = self._tasks_for_stage(plan, stage)
+                if stage == "agents":
+                    stage_tasks = self._admit_roles(context, stage_tasks)
                 stage_deadline = deadline
                 if stage == "agents" and deadline:
                     # The judging roles run after the hypothesis roles,
@@ -813,7 +816,7 @@ class ScanOrchestrator:
                     stage_deadline = max(deadline - reserve, deadline * 0.5)
                 tokens_spent = await self._run_agent_tasks(
                     context,
-                    self._tasks_for_stage(plan, stage),
+                    stage_tasks,
                     agent_scope,
                     state,
                     spent=tokens_spent,
@@ -1812,6 +1815,33 @@ class ScanOrchestrator:
     # ------------------------------------------------------------------
     # Phases
     # ------------------------------------------------------------------
+    def _admit_roles(self, context: ScanContext, tasks: list[Any]) -> list[Any]:
+        """The roles a scan runs, and the ones it cannot afford.
+
+        The roles are admitted in the order of their yield, so the ones
+        that run are the ones that find something.  A role that is not
+        admitted is recorded as cut off, with the reason, rather than
+        being left pending: a scan that says what it did not do is
+        worth more than one that looks busy.
+        """
+        limit = int(self.settings.agent_max_roles or 0)
+        if limit <= 0 or len(tasks) <= limit:
+            return tasks
+        ordered = sorted(tasks, key=lambda task: self._role_rank(getattr(task, "role", "")))
+        admitted = ordered[:limit]
+        for task in ordered[limit:]:
+            self.tasks.set_status(
+                task.task_id,
+                "wall_clock",
+                error=(f"the scan's budget allowed {limit} role(s) and this one was not among them"),
+            )
+            self._emit(
+                context.scan_id,
+                "task.wall_clock",
+                {"task_id": task.task_id, "role": task.role, "reason": "the budget"},
+            )
+        return sorted(admitted, key=lambda task: self._role_rank(getattr(task, "role", "")))
+
     def _judging_reserve(self, context: ScanContext, deadline: float) -> float:
         """The share of the agent budget kept for the judging roles."""
         total = max(0.0, deadline - time.monotonic())

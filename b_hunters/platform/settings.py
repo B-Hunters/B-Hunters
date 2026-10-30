@@ -172,6 +172,16 @@ class Settings:
     #: deadline so that the roles that give a finding its verdict have
     #: time to give it.
     agent_judging_budget_share: float = 0.3
+    #: How many agent roles a scan runs.  Zero means every role the
+    #: profile names.
+    #:
+    #: A reasoning model spends about 150 seconds and 150,000 tokens on
+    #: one role, so twelve roles need nine minutes of agent time on
+    #: their own.  A scan whose budget is smaller than that has to
+    #: choose: it runs the roles that yield the most and records the
+    #: rest as cut off, rather than starting twelve roles and
+    #: finishing none of them.
+    agent_max_roles: int = 0
 
     # --- scope enforcement defaults ----------------------------------------
     scope_allow_private_network: bool = False
@@ -296,6 +306,7 @@ def load_settings(
                 "agent_max_rounds",
                 "agent_max_tokens_per_scan",
                 "agent_judging_budget_share",
+                "agent_max_roles",
                 "agent_max_task_budget",
                 "agent_wall_clock_seconds",
                 "agent_max_tokens_per_task",
