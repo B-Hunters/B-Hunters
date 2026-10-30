@@ -73,11 +73,7 @@ async def test_every_missing_header_is_reported(monkeypatch):
 
     result = await security_headers_executor(_request())
 
-    missing = {
-        finding["title"]
-        for finding in _findings(result)
-        if finding["title"].startswith("Missing")
-    }
+    missing = {finding["title"] for finding in _findings(result) if finding["title"].startswith("Missing")}
     assert len(missing) >= 4
     assert "Missing strict-transport-security header" in missing
     assert "Missing content-security-policy header" in missing
