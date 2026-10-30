@@ -10,31 +10,45 @@ is estimated.
 
 ---
 
-## 0. The current baseline (2026-10-29)
+## 0. The current baseline (2026-10-30)
 
 The work of 2026-10-21 is below. It has since been extended by the
-worker-output and agent-framework work of 2026-10-28, which is what the
-rest of this document describes.
+worker-output and agent-framework work of 2026-10-28, by the durable
+execution and the asset work of 2026-10-29, and by the verification run
+of the same day.
 
 ```
 $ pytest tests -q
-414 passed in 17.22s
+712 passed in 68.09s
 ```
 
 | Suite | Tests | Needs |
 |---|---|---|
-| `tests/unit` | 221 | nothing |
+| `tests/unit` | 345 | nothing |
 | `tests/security` | 91 | nothing |
 | `tests/integration` | 77 | MongoDB |
 | `tests/bench` | 25 | MongoDB for two of them |
 
-38 test modules, 6,732 lines. `ruff check b_hunters tests` and
-`ruff format --check b_hunters tests` are clean.
+42 test modules. `ruff check b_hunters tests` and
+`ruff format --check b_hunters tests` are clean, and
 
-`mypy b_hunters/platform --ignore-missing-imports --no-strict-optional`
-reports **36 errors in 14 files** — the agent framework and runtime
-modules. The job is wired into CI but has never been run to completion
-locally; it is Phase 6 work in the hardening plan.
+```
+$ mypy b_hunters/platform b_hunters/bhunter.py --ignore-missing-imports --no-strict-optional
+Success: no issues found in 72 source files
+```
+
+which is a change: the type check reported 36 errors in 14 files when
+this work started.
+
+The console is 15 native ES modules under `b_hunters/web/js/` with 106
+`node --test` tests and a CI job that runs them.
+
+**The verification run** is in `docs/verification.md`: three laboratory
+scans through the runner, every worker and every native adapter
+accounted for with a reason, the asset inventory collected with the
+JavaScript and the images among it, and the integrity verdict
+computed. The agent phase could not run — the model provider's plan is
+exhausted — and the platform reported that honestly.
 
 Since 2026-10-21 the platform has gained:
 
@@ -47,7 +61,12 @@ Since 2026-10-21 the platform has gained:
 * the PydanticAI agent framework, the runtime with its budgets, the
   evidence shapes and the verdict recording;
 * `list_worker_output`, `scan_these_urls` and the other worker-output
-  tools, so the agents can read what the scanners found.
+  tools, so the agents can read what the scanners found;
+* the durable job queue, the runner process, the phase checkpoints and
+  the resume (`docs/runner.md`);
+* the asset inventory, the crawler, the participation table, the stop
+  reasons, the transcripts and the error ledger (`docs/assets.md`);
+* the console as native ES modules with tests (`docs/console.md`).
 
 The designs for what comes next are
 `docs/superpowers/specs/2026-10-29-single-operator-platform-design.md`
