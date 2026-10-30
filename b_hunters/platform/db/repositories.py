@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 import uuid
 from collections.abc import Sequence
@@ -22,7 +23,11 @@ from pymongo.errors import DuplicateKeyError
 from ..security.passwords import hash_password, needs_rehash
 from ..security.secrets import SecretBox, SecretKeyError
 from ..security.sessions import hash_session_id
+from ..vuln_classes import normalise_vuln_class
 from .client import Database
+
+#: The CWE numbers a free-text class names.
+_CWES = re.compile(r"cwe[-_ ]?(\d{1,4})")
 
 if TYPE_CHECKING:
     # The service container imports this module, so it is only imported
@@ -989,12 +994,30 @@ class FindingRepository:
         finding update its ``last_seen_at`` and widens the detector list
         instead of creating a duplicate.
         """
+        # The class is normalised on the way in.  The agent roles name a
+        # class in their own words, and more than seventy spellings of
+        # twenty kinds of vulnerability make the same finding look like
+        # several: the fingerprint changes, the triage view splits it,
+        # and the benchmark counts it as missed.  The original text is
+        # kept beside the canonical name, because it carries the detail.
+        canonical_class = normalise_vuln_class(vuln_class)
+        discriminator = extra_key
+        if canonical_class != str(vuln_class or "").strip().lower():
+            # The discriminator keeps two findings apart that the
+            # canonical name would otherwise merge.  It is the CWE the
+            # class names, because two weaknesses of the same kind at
+            # the same place are two findings and not one.
+            cwes = _CWES.findall(str(vuln_class or "").lower())
+            if cwes:
+                discriminator = f"{discriminator}|cwe-{'-'.join(cwes)}".strip("|")
+            else:
+                discriminator = f"{discriminator}|{vuln_class}".strip("|")
         fingerprint = compute_fingerprint(
-            vuln_class=vuln_class,
+            vuln_class=canonical_class,
             host=host,
             path=path,
             parameter=parameter,
-            extra=extra_key,
+            extra=discriminator,
         )
         now = utcnow()
         existing = self._col.find_one({"scan_id": scan_id, "fingerprint": fingerprint})
@@ -1005,7 +1028,8 @@ class FindingRepository:
                 "fingerprint": fingerprint,
                 "title": title,
                 "summary": summary,
-                "vuln_class": vuln_class,
+                "vuln_class": canonical_class,
+                "vuln_class_raw": vuln_class,
                 "severity": severity if severity in SEVERITIES else "info",
                 "host": host,
                 "path": path,
