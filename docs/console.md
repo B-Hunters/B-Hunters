@@ -47,10 +47,11 @@ b_hunters/web/
 | Tool calls | Every tool invocation, with its duration and its output |
 | Scanners | The tool participation table and what each worker produced |
 | Services | What runs on each URL, and which version |
+| Changes | What is new, what was not seen again and what came back since the last comparable scan |
 | URLs | The whole asset inventory, with a type filter |
 | JS | The JavaScript files the target serves |
 | Images | The images the target serves |
-| Findings | The findings of the scan |
+| Findings | The findings of the scan, filterable by what found them |
 
 ## The participation table
 
@@ -84,6 +85,7 @@ The Agents tab gives each role the reason it ended:
 |---|---|
 | `completed` | The role concluded |
 | `budget_exhausted` | The role ran out of rounds, tokens or tool calls |
+| `no_new_evidence` | The role found nothing new for three rounds and stopped |
 | `wall_clock` | The role ran out of time — it was cut off |
 | `cancelled` | The scan was stopped |
 | `failed` | The role raised an error |
@@ -92,6 +94,23 @@ The scan's time cap is an **enforced deadline**: a role that has not
 started when the deadline passes is recorded as `wall_clock` and never
 runs, and a role cut off mid-flight is recorded as `wall_clock` too.
 A role that was cut off is never reported as one that found nothing.
+
+A role that stopped for want of new evidence keeps what it worked out:
+a role that concluded in prose stays a success, and a role that never
+concluded keeps its last words and the reason it stopped.
+
+## The changes
+
+The Changes tab compares the scan with the last one of the same target
+that asked the same question. When the two are not comparable — a
+different scope, a different set of tools, a scan that did not finish
+— the tab says so instead of showing a difference that is not there.
+
+The groups are **new**, **reopened**, **not observed** and **still
+there**. A finding that was not seen again is *not observed*, not
+*fixed*: the absence of a finding is not evidence that it was fixed,
+and the issue is closed by the auto-close rule after two comparable
+scans in a row missed it.
 
 ## The transcript
 
