@@ -55,7 +55,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: b-hunters-platform:1.2.0
+    image: b-hunters-platform:1.3.0
     container_name: bhunter_platform
     # Share the tailnet node's network namespace, so the platform is the
     # node named "bhunter" and is reachable over the tailnet.
@@ -134,7 +134,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: b-hunters-platform:1.2.0
+    image: b-hunters-platform:1.3.0
     container_name: bhunter_callbacks
     restart: unless-stopped
     depends_on:
@@ -175,7 +175,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: b-hunters-platform:1.2.0
+    image: b-hunters-platform:1.3.0
     container_name: bhunter_runner
     restart: unless-stopped
     depends_on:
@@ -343,7 +343,7 @@ services:
   # Every worker reads the same configuration and registers under its own
   # Karton identity.
   worker-nuclei:
-    image: b-hunters-local/nuclei:1.2.0
+    image: b-hunters-local/nuclei:1.3.0
     container_name: bhunter_worker_nuclei
     restart: unless-stopped
     volumes:
@@ -357,7 +357,7 @@ services:
         ipv4_address: 172.25.0.40
 
   worker-katana:
-    image: b-hunters-local/katana:1.2.0
+    image: b-hunters-local/katana:1.3.0
     container_name: bhunter_worker_katana
     restart: unless-stopped
     volumes:
@@ -371,7 +371,7 @@ services:
         ipv4_address: 172.25.0.41
 
   worker-nmap:
-    image: b-hunters-local/nmap:1.2.0
+    image: b-hunters-local/nmap:1.3.0
     container_name: bhunter_worker_nmap
     restart: unless-stopped
     volumes:
@@ -385,7 +385,7 @@ services:
         ipv4_address: 172.25.0.42
 
   worker-sqlmap:
-    image: b-hunters-local/sqlmap:1.2.0
+    image: b-hunters-local/sqlmap:1.3.0
     container_name: bhunter_worker_sqlmap
     restart: unless-stopped
     volumes:
@@ -399,7 +399,7 @@ services:
         ipv4_address: 172.25.0.43
 
   worker-dalfox:
-    image: b-hunters-local/dalfox:1.2.0
+    image: b-hunters-local/dalfox:1.3.0
     container_name: bhunter_worker_dalfox
     restart: unless-stopped
     volumes:
@@ -413,7 +413,7 @@ services:
         ipv4_address: 172.25.0.44
 
   worker-webtechnology:
-    image: b-hunters-local/webtechnology:1.2.0
+    image: b-hunters-local/webtechnology:1.3.0
     container_name: bhunter_worker_webtechnology
     restart: unless-stopped
     volumes:
@@ -431,7 +431,7 @@ services:
   # which the crawler turns into the "paths" task the scanners consume.
   # Without it the other workers never receive anything.
   worker-subrecon:
-    image: b-hunters-local/subrecon:1.2.0
+    image: b-hunters-local/subrecon:1.3.0
     container_name: bhunter_worker_subrecon
     restart: unless-stopped
     volumes:
@@ -449,7 +449,7 @@ services:
   # second Karton backend, so a worker that is missing here is missing from
   # the console too.
   worker-dirsearch:
-    image: b-hunters-local/dirsearch:1.2.0
+    image: b-hunters-local/dirsearch:1.3.0
     container_name: bhunter_worker_dirsearch
     restart: unless-stopped
     volumes:
@@ -463,7 +463,7 @@ services:
         ipv4_address: 172.25.0.47
 
   worker-paramspider:
-    image: b-hunters-local/paramspider:1.2.0
+    image: b-hunters-local/paramspider:1.3.0
     container_name: bhunter_worker_paramspider
     restart: unless-stopped
     volumes:
@@ -480,7 +480,7 @@ services:
   # an object-level authorisation flaw needs: the other tools enumerate
   # names and paths, this one changes what is asked for.
   worker-ffuf:
-    image: b-hunters-local/ffuf:1.2.0
+    image: b-hunters-local/ffuf:1.3.0
     container_name: bhunter_worker_ffuf
     restart: unless-stopped
     volumes:
@@ -494,7 +494,7 @@ services:
         ipv4_address: 172.25.0.49
 
   worker-wayback:
-    image: b-hunters-local/wayback:1.2.0
+    image: b-hunters-local/wayback:1.3.0
     container_name: bhunter_worker_wayback
     restart: unless-stopped
     volumes:
@@ -508,7 +508,7 @@ services:
         ipv4_address: 172.25.0.50
 
   worker-getjs:
-    image: b-hunters-local/getjs:1.2.0
+    image: b-hunters-local/getjs:1.3.0
     container_name: bhunter_worker_getjs
     restart: unless-stopped
     volumes:
@@ -522,7 +522,7 @@ services:
         ipv4_address: 172.25.0.51
 
   worker-jsscanner:
-    image: b-hunters-local/jsscanner:1.2.0
+    image: b-hunters-local/jsscanner:1.3.0
     container_name: bhunter_worker_jsscanner
     restart: unless-stopped
     volumes:
@@ -536,7 +536,7 @@ services:
         ipv4_address: 172.25.0.52
 
   worker-ssti:
-    image: b-hunters-local/ssti:1.2.0
+    image: b-hunters-local/ssti:1.3.0
     container_name: bhunter_worker_ssti
     restart: unless-stopped
     volumes:
@@ -552,7 +552,7 @@ services:
   # The two slowest scanners.  They are the ones that exceed a short
   # measurement window, so a scan needs a generous duration budget.
   worker-wapiti:
-    image: b-hunters-local/wapiti:1.2.0
+    image: b-hunters-local/wapiti:1.3.0
     container_name: bhunter_worker_wapiti
     restart: unless-stopped
     volumes:
@@ -566,7 +566,7 @@ services:
         ipv4_address: 172.25.0.54
 
   worker-xray:
-    image: b-hunters-local/xray:1.2.0
+    image: b-hunters-local/xray:1.3.0
     container_name: bhunter_worker_xray
     restart: unless-stopped
     volumes:
@@ -583,7 +583,7 @@ services:
   # URL, which is the heaviest of the seventeen against a laboratory
   # application.
   worker-gowitness:
-    image: b-hunters-local/gowitness:1.2.0
+    image: b-hunters-local/gowitness:1.3.0
     container_name: bhunter_worker_gowitness
     restart: unless-stopped
     volumes:
@@ -613,7 +613,7 @@ services:
     environment:
       WEB_HOST: "0.0.0.0"
     ports:
-      - "127.0.0.1:5013:5013"
+      - "0.0.0.0:5013:5013"
     networks:
       bhunter:
         ipv4_address: 172.25.0.15
@@ -636,7 +636,7 @@ services:
       # after a few hours and took the target away mid-scan.
       NODE_OPTIONS: "--max-old-space-size=12288"
     ports:
-      - "127.0.0.1:3300:3000"
+      - "0.0.0.0:3300:3000"
     mem_limit: 16g
     networks:
       bhunter:
@@ -648,7 +648,7 @@ services:
     profiles: ["lab"]
     restart: "no"
     ports:
-      - "127.0.0.1:8081:8080"
+      - "0.0.0.0:8081:8080"
     # The image's own healthcheck calls curl, which the image does not
     # have: the container was reported unhealthy for months while the
     # application served normally.  The image has bash, and bash can

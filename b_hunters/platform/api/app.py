@@ -55,7 +55,7 @@ def create_app(
             "Authenticated API for the B-Hunters application security platform: "
             "scans, findings, agents, Karton monitoring and benchmarking."
         ),
-        version="1.2.0",
+        version="1.3.0",
         docs_url="/api/docs",
         redoc_url=None,
         openapi_url="/api/openapi.json",

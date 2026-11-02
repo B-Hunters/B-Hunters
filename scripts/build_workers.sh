@@ -23,7 +23,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPOS_ROOT="$(cd "${REPO_ROOT}/.." && pwd)"
-VERSION="${BHUNTERS_WORKER_VERSION:-1.2.0}"
+VERSION="${BHUNTERS_WORKER_VERSION:-1.3.0}"
 PYTHON="${PYTHON:-/home/sniper/pentest/.venv/bin/python}"
 BUILD_DIR="$(mktemp -d)"
 
@@ -117,12 +117,15 @@ source, target, wheel = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sy
 text = source.read_text()
 lines = []
 for line in text.splitlines(keepends=True):
-    lines.append(line)
     if "pip install" in line and "${B_HUNTERS_WHEEL}" in line:
-        # The published release is installed first: it carries the
-        # dependencies.  The wheel built from this repository is then
-        # laid over it, so the shared class is the one this repository
-        # has and the dependencies are the ones the release declares.
+        # The wheel built from this repository is installed in the
+        # place of the published release, and it is installed *with*
+        # its dependencies: the release may not be published yet, and
+        # the dependencies are what the worker needs to run at all.
+        #
+        # The wheel is copied into the image first: the build context
+        # is not on the path of the working directory, and the working
+        # directory is not the root of the context.
         #
         # The flags of the original line are carried over: an image
         # that installs into the system packages needs to be told so
@@ -130,11 +133,20 @@ for line in text.splitlines(keepends=True):
         flags = ""
         if "--break-system-packages" in line:
             flags = " --break-system-packages"
+        others = [
+            part
+            for part in line.split()
+            if part not in {"RUN", "pip", "install", "--no-cache-dir", "${B_HUNTERS_WHEEL}", flags.strip()}
+            and not part.startswith("--")
+        ]
         lines.append(f"COPY {wheel} /tmp/{wheel}\n")
         lines.append(
-            "RUN pip install --no-cache-dir --no-deps --force-reinstall"
-            f"{flags} /tmp/{wheel} && rm -f /tmp/{wheel}\n"
+            f"RUN pip install --no-cache-dir{flags} /tmp/{wheel}"
+            + ("" if not others else " " + " ".join(others))
+            + f" && rm -f /tmp/{wheel}\n"
         )
+        continue
+    lines.append(line)
 target.write_text("".join(lines))
 PYTHON
 
