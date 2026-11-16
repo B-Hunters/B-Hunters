@@ -397,3 +397,21 @@ class BHunters(Karton):
             safe_name = hash_object.hexdigest()
 
         return safe_name
+
+    def publish_task_with_artifact(self, task, bucket, key, body):
+        """Publish a task that carries the artefact its consumers will read.
+
+        The Karton collector removes every object in the bucket that no
+        registered task references, and a raw write is referenced by
+        nobody.  A task that carries the artefact keeps it alive for the
+        life of the scan and releases it when the last consumer is done.
+
+        The consumers keep downloading it by the key they compute; only
+        the lifetime of the object changes.
+        """
+        from b_hunters.artifacts import publish_with_artifact
+
+        publish_with_artifact(
+            self.backend, task, bucket=bucket, key=key, body=body
+        )
+        self.send_task(task)
