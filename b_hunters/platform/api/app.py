@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from ..__version__ import __version__ as platform_version
 from ..settings import Settings, get_settings
 from .deps import Services, get_services, set_services
 from .routers import (
@@ -55,7 +56,7 @@ def create_app(
             "Authenticated API for the B-Hunters application security platform: "
             "scans, findings, agents, Karton monitoring and benchmarking."
         ),
-        version="1.3.0",
+        version=platform_version,
         docs_url="/api/docs",
         redoc_url=None,
         openapi_url="/api/openapi.json",
