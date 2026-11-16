@@ -76,6 +76,19 @@ WORKER_IDENTITIES: tuple[str, ...] = (
     "B-Hunters-xray",
 )
 
+#: The workers that test the URLs the crawler found.
+#:
+#: They need URLs that carry a parameter, and the page of a target
+#: usually has none: a scanner handed such a list filters it down to
+#: nothing and exits without testing anything.  That is a different
+#: fact from a scanner that tested everything and found nothing, and
+#: the console has to be able to say which one happened.
+PATH_SCANNERS: tuple[str, ...] = (
+    "B-Hunters-DalFox",
+    "B-Hunters-SQLMap",
+    "B-Hunters-SSTI-Checker",
+)
+
 
 def count_items(value: Any) -> int:
     """How many items a report field holds.
@@ -352,7 +365,13 @@ def scanner_report(
                 "items": sum(item["count"] for item in found),
                 "candidates": counts["urls_with_parameters"],
                 "output": found,
-                "status": _status(tasks, found, int(live.get(identity, 0))),
+                "status": _status(
+                    tasks,
+                    found,
+                    int(live.get(identity, 0)),
+                    worker=identity,
+                    candidates=counts["urls_with_parameters"],
+                ),
             }
         )
 
@@ -364,11 +383,25 @@ def scanner_report(
     }
 
 
-def _status(tasks: int, found: list[dict[str, Any]], live_tasks: int) -> str:
-    """What the console says about one worker."""
+def _status(
+    tasks: int,
+    found: list[dict[str, Any]],
+    live_tasks: int,
+    *,
+    worker: str = "",
+    candidates: int = 0,
+) -> str:
+    """What the console says about one worker.
+
+    A path scanner that was handed no URL with a parameter had nothing
+    to test.  Reporting that as a scanner that found nothing would be a
+    false clean bill of health for work that never happened.
+    """
     if found:
         return "found"
     if tasks:
+        if worker in PATH_SCANNERS and candidates <= 0:
+            return "ran, had nothing to test"
         return "ran, found nothing"
     if live_tasks:
         return "running"

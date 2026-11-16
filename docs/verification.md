@@ -53,6 +53,46 @@ table says for each worker whether it *ran and found nothing*, whether
 it was *never dispatched*, or whether it *errored* — three different
 failures, and the console shows which one happened.
 
+### The path scanners were handed nothing to test
+
+The fifteen workers reported as *"ran, found nothing"* include the three
+path scanners — `sqlmap`, `dalfox` and `ssti`. They did not find nothing.
+**They were handed nothing to test.**
+
+A path scanner tests the URLs that carry a parameter. The crawler hands
+it the links it followed, and the scanner filters them with
+`grep "="`, `uro --filter hasparams` and `qsreplace FUZZ`. For the
+laboratory the crawler found fifteen URLs, and **none of them carried a
+parameter**:
+
+```
+$ python -c "from b_hunters.platform.scanners.worker_output import candidates; ..."
+172.25.0.14:8080/WebGoat    crawled=15   with_params=0
+```
+
+So the filter removed every one of them, the scanner had nothing left,
+and it exited successfully in eighty-three milliseconds:
+
+```
+[03:54:17,426] Starting processing new url
+[03:54:17,426] [WARNING] katana 172.25.0.13:3000
+[03:54:17,509] Task done
+```
+
+Reported as *"ran, found nothing"*, that is a false clean bill of health
+for work that never happened — and it is what the platform said for every
+scan of the laboratory.
+
+There is now a fifth reason for it to say:
+
+| Reason | Meaning |
+|---|---|
+| `ran, had nothing to test` | it is a path scanner, it ran, it produced no finding, and the crawler found no URL with a parameter for it to test |
+
+The count is recorded with the worker's outcome, so the reason is
+decided by the facts of the scan rather than guessed when the table is
+read.
+
 Every native adapter reported on every scan:
 
 | Adapter | DVGA | Juice Shop | WebGoat | Final |

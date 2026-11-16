@@ -14,36 +14,58 @@ Four cases are genuinely missed, and they share two causes.
 
 ### A1 — the three path scanners have produced nothing since mid-October
 
-`sqlmap`, `dalfox` and `ssti` consume the `paths`/`scan` task and download the
-URL list from the object store. The list is written as a **raw S3 object**:
+`sqlmap`, `dalfox` and `ssti` consume the `paths`/`scan` task and filter the
+crawler's list down to the URLs that carry a parameter:
 
 ```python
-# B-Hunters-Katana/katanam/katanam.py:101
-self.backend.upload_object("bhunters", "katana_" + scan_id + "_" + encoded, body)
+# B-Hunters-DalFox/dalfox/dalfox.py:41-57
+p3 = subprocess.Popen(["grep", "-v", "png|jpg|css|js|gif|txt"], ...)
+p4 = subprocess.Popen(["grep", "="], ...)
+p5 = subprocess.Popen(["uro", "--filter", "hasparams"], ...)
+p6 = subprocess.Popen(["qsreplace", "FUZZ"], ...)
+newlinks = self.checklinksexist(self.subdomain, [...])
+if newlinks == []:
+    return [], []          # ← nothing to test: the scanner exits, successfully
 ```
 
-The Karton router's garbage collector deletes every object in that bucket that
-no registered task references, every three minutes:
+For the laboratory the filter leaves **nothing**. The crawler's haul is
+fifteen URLs, and not one of them carries a parameter:
 
-```python
-# Karton v5.5.0, karton/system/system.py
-def gc_collect_resources(self) -> None:
-    karton_bucket = self.backend.default_bucket_name
-    resources_to_remove = set(self.backend.list_objects(karton_bucket))
-    for task in self.backend.iter_all_tasks():
-        for resource in task.iterate_resources():
-            if resource.bucket == karton_bucket and resource.uid in resources_to_remove:
-                resources_to_remove.remove(resource.uid)
-    if resources_to_remove:
-        self.backend.remove_objects(karton_bucket, resources_to_remove)
+```
+172.25.0.14:8080/WebGoat    crawled=15   with_params=0
 ```
 
-A raw write is referenced by nobody, so the collector takes it. Verified
-against the running stack: the `bhunters` bucket holds **0 objects**.
+The seven links in the `links` document are four style sheets and three
+paths — `/WebGoat/registration`, `/WebGoat/login`, `/WebGoat/start.mvc` —
+and none of them contains a `=`.
 
-The two workers that still report — `nuclei` and `wapiti` — scan the target
-directly and never read the list. `ffuf` builds its own inventory and does
-not read it either. Everything that depends on the list produces nothing.
+The scanner therefore exits in eighty-three milliseconds, **successfully**:
+
+```
+[2026-11-02 03:54:17,426] Starting processing new url
+[2026-11-02 03:54:17,426] [WARNING] katana 172.25.0.13:3000
+[2026-11-02 03:54:17,509] Task done
+```
+
+And the platform reports it as *"ran, found nothing"* — a false clean bill
+of health for work that never happened.
+
+### A1a — the garbage collector is not the cause
+
+This was the first hypothesis and it is wrong, so it is recorded here to
+save the next reader the detour.
+
+* The crawler already publishes the list as a Karton `LocalResource`
+  (`katanam.py:144`), so the collector keeps it for the life of the scan.
+* All three scanners already fall back to the database when the object
+  store copy has gone (`sqlmapm.py:166`, `dalfox.py:103`,
+  `sstichecker.py:63`).
+* An empty bucket after a scan has finished is the **correct** steady
+  state.
+
+The bucket that was observed empty was the **older** `bh-*` stack's: the
+current platform's object store publishes no host port and is reachable
+only on the `bhunter` network.
 
 ### A2 — a single-page application's API is never tested
 
@@ -91,65 +113,71 @@ converted into a finding of class `api_discovery` or `javascript_analysis`.
 
 ## 3. The design
 
-### 3.1 A1 — the artefact becomes a tracked Karton resource
+### 3.1 A1 — the platform must say a scanner had nothing to test
 
-Karton keeps an object alive for exactly as long as a registered task
-references it, and removes it when the last such task finishes. The
-collector's own code says so: it keeps every `resource.uid` that appears in
-`task.iterate_resources()`.
-
-So the path list must be **a resource of the task that publishes it**, not a
-raw object.
-
-**New helper in the shared base class** — `b_hunters/bhunter.py`:
+The platform already knows the answer and does not use it.
+`candidates()` counts the crawler's URLs that carry a parameter, and every
+worker row in the participation table carries that count:
 
 ```python
-def publish_task_with_artifact(self, task, bucket, key, body):
-    """Publish a task that carries the artefact its consumers will read.
-
-    A raw write to the object store is referenced by no task, and the
-    Karton collector removes every such object.  A task that carries the
-    artefact as a resource keeps it alive for the life of the task and
-    releases it when the last consumer is done.
-    """
-    self.backend.upload_object(bucket, key, body)
-    resource = RemoteResource(name=key, bucket=bucket, uid=key)
-    task.add_resource("artifact", resource, persistent=True)
-    self.send_task(task)
+# b_hunters/platform/scanners/worker_output.py:334
+counts = candidates(database, report) if report else {...}
+...
+"candidates": counts["urls_with_parameters"],
 ```
 
-`RemoteResource(name, bucket, uid)` is the constructor in Karton v5.5.0
-(`karton/core/resource.py:364`). `uid` is the S3 key, so the collector
-recognises the object by the key it already uses, and the workers keep
-downloading by the same key — no worker-side change to the download path.
+What was missing is a reason that says what the count means. The table
+has five reasons, and a path scanner that was handed nothing lands on
+*"ran, found nothing"* — a false clean bill of health for work that never
+happened.
 
-`persistent=True` puts the resource in the task's persistent payload, so it
-is inherited by every task in the subtree and survives the fork the router
-makes for each consumer.
-
-**Two call sites change:**
+**The fix is a sixth reason and the record that supports it.**
 
 | Where | Change |
 |------|--------|
-| `B-Hunters-Katana/katanam/katanam.py` | the `paths`/`scan` task is published through the helper, with the list it just uploaded |
-| `b_hunters/platform/bench/workers.py` | `_upload_paths` publishes through the helper instead of writing with a bare boto3 client |
+| `platform/scanners/worker_output.py` | `PATH_SCANNERS` — the workers that test the candidate list; `_status()` takes the candidate count and the worker identity |
+| `platform/db/assets.py` | `WorkerRunRepository.record()` takes `candidates` and stores it |
+| `platform/agents/orchestrator.py` | `_record_worker_outcomes()` computes the count once and records it with every worker's outcome |
+| `platform/api/routers/assets.py` | `_reason_for()` consults the count; the docstring documents the reason |
 
-**Why the workers that read the list need no change.** They download by raw
-key (`sqlmapm.py:145`, `dalfox`, `sstichecker`). The key is unchanged; only
-the *lifetime* of the object changes. The download keeps working — it simply
-finds an object that is still there.
+The reason is decided by the facts of the scan, not guessed when the table
+is read — which is the rule the participation table already follows for
+the other four reasons.
 
-**The lifecycle becomes correct:**
+This is the same principle the platform already applies to the agent
+roles: *"A role that was cut off looks like a role that found nothing"*
+(`STATUS.md` §7 #15) was fixed by recording the stop reason. The
+scanners had the same defect and the same remedy.
 
+### 3.1b The platform's own path list is still an untracked write
+
+The workers publish their list as a Karton `LocalResource`, which the
+collector keeps for the life of the scan. The platform's benchmark harness
+does not: it writes with a bare boto3 client.
+
+```python
+# b_hunters/platform/bench/workers.py:518
+client.put_object(Bucket=self.s3_bucket, Key=key, Body=body)
 ```
-upload ──▶ task published ──▶ router forks it to 4 consumers
-                                  │
-                    each consumer's task holds the resource
-                                  │
-                  collector sees the reference, keeps the object
-                                  │
-             last consumer finishes ──▶ task deleted ──▶ object deleted
-```
+
+That object is referenced by no task, so the collector removes it. It is
+not the cause of A1 — the scanners fall back to the database — but it is
+the same mistake in one place, and the benchmark harness is the place
+where a *new* scanner is exercised first.
+
+**The fix** is a shared mechanism, `b_hunters/artifacts.py`, with the key
+convention and the attachment in one place, and a base-class method that
+uses it. `b_hunters/artifacts.py` reproduces the worker's `encode_filename`
+exactly — including the shortening of a very long name — and a test
+asserts the two agree, because a producer that names an artefact
+differently writes to a key the consumer never reads.
+
+### 3.1c The workers that read the list need no change
+
+They download by raw key (`sqlmapm.py:166`, `dalfox.py:113`,
+`sstichecker.py:73`) and fall back to the database when the object store
+copy has gone. The key is unchanged; only the lifetime of the object
+changes.
 
 ### 3.2 A2 — the platform publishes the list the scanners should use
 

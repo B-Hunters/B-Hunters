@@ -1425,6 +1425,7 @@ class ScanOrchestrator:
             log.exception("could not read the worker outcomes of the scan %s", context.scan_id)
             return
         expected = self._expected_worker_versions()
+        candidates = self._candidate_count(context)
         for outcome in outcomes:
             worker = str(outcome.get("worker", ""))
             if not worker:
@@ -1438,7 +1439,30 @@ class ScanOrchestrator:
                 # A worker that consumed a task was online.
                 connected=True,
                 expected_version=expected.get(worker, ""),
+                candidates=candidates,
             )
+
+    def _candidate_count(self, context: ScanContext) -> int:
+        """How many of the crawler's URLs a path scanner could test.
+
+        A path scanner tests the URLs that carry a parameter, and the
+        page of a target usually has none.  The count is what tells a
+        scanner that tested everything and found nothing from one that
+        was handed nothing to test, so it is recorded with the outcome.
+        """
+        from ..scanners import worker_output
+
+        try:
+            _report_id, report = worker_output.report_for_scan(self.db, context.scan_id)
+            if not report:
+                return 0
+            counts = worker_output.candidates(self.db, report)
+            return int(counts["urls_with_parameters"])
+        except Exception:  # pragma: no cover - the report may not be there yet
+            log.exception(
+                "could not read the candidate URLs of the scan %s", context.scan_id
+            )
+            return 0
 
     def _expected_worker_versions(self) -> dict[str, str]:
         """The version the platform expects of every worker.

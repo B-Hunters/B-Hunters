@@ -317,6 +317,7 @@ class WorkerRunRepository:
         crashed_tasks: int = 0,
         connected: bool = False,
         expected_version: str = "",
+        candidates: int = 0,
     ) -> dict[str, Any]:
         """Record what one worker did in one scan.
 
@@ -325,6 +326,11 @@ class WorkerRunRepository:
         must not lower the count the work produced - and the crashed
         tasks are added, because a crash is an event rather than a
         state.  A worker that was seen to be online stays connected.
+
+        ``candidates`` is how many of the crawler's URLs carry a
+        parameter, which is how many a path scanner could test.  It is
+        the difference between a scanner that tested everything and
+        found nothing and one that was handed nothing to test.
         """
         name = str(worker or "").strip()
         if not name:
@@ -341,6 +347,7 @@ class WorkerRunRepository:
                 "crashed_tasks": int(crashed_tasks),
                 "connected": bool(connected),
                 "expected_version": str(expected_version or ""),
+                "candidates": int(candidates),
                 "first_seen_at": now,
                 "last_seen_at": now,
             }
@@ -358,6 +365,7 @@ class WorkerRunRepository:
             "findings": max(int(existing.get("findings", 0) or 0), int(findings)),
             "crashed_tasks": int(existing.get("crashed_tasks", 0) or 0) + int(crashed_tasks),
             "connected": bool(existing.get("connected")) or bool(connected),
+            "candidates": max(int(existing.get("candidates", 0) or 0), int(candidates)),
             "last_seen_at": now,
         }
         if expected_version and not existing.get("expected_version"):

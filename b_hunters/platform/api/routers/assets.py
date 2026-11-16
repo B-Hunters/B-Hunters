@@ -15,6 +15,11 @@ table is read:
     it was connected, but consumed no task for this scan;
 ``ran, found nothing``
     it consumed at least one task and produced no finding;
+``ran, had nothing to test``
+    it is a path scanner, it consumed at least one task, it produced no
+    finding, and the crawler found no URL with a parameter for it to
+    test - so it was handed nothing and exited without looking at
+    anything;
 ``errored``
     it consumed at least one task and had at least one crashed task;
 ``ran``
@@ -22,7 +27,9 @@ table is read:
 
 A tool that ran and found nothing is reported as having run and found
 nothing.  It is never reported as absent, and it is never reported as a
-failure.
+failure.  A path scanner that was handed nothing to test is reported as
+such, because a scanner that tested everything and found nothing is a
+different fact from one that never tested anything.
 
 The same rule governs the agents: a role that never started is reported
 as a role that never started, and a role that was cut off by the
@@ -43,7 +50,7 @@ from ...agents.orchestrator import ScanProfile
 from ...agents.roles import builtin_roles
 from ...agents.schemas import stop_reason_for
 from ...errors import ledger_from_records
-from ...scanners.worker_output import WORKER_IDENTITIES
+from ...scanners.worker_output import PATH_SCANNERS, WORKER_IDENTITIES
 from ..deps import CurrentUser, Services, current_user, get_services
 
 router = APIRouter(prefix="/scans", tags=["assets"])
@@ -607,7 +614,24 @@ def _reason_for(run: dict[str, Any]) -> str:
         return "errored"
     if int(run.get("findings", 0) or 0) > 0:
         return "ran"
+    if _had_nothing_to_test(run):
+        return "ran, had nothing to test"
     return "ran, found nothing"
+
+
+def _had_nothing_to_test(run: dict[str, Any]) -> bool:
+    """Whether a path scanner was handed no URL it could test.
+
+    A path scanner tests the URLs that carry a parameter.  When the
+    crawler found none, the scanner filters the list down to nothing and
+    exits without testing anything - which is not the same as a scanner
+    that tested everything and found nothing, and reporting it as such
+    would be a false clean bill of health for work that never happened.
+    """
+    worker = str(run.get("worker", "") or "")
+    if worker not in PATH_SCANNERS:
+        return False
+    return int(run.get("candidates", 0) or 0) <= 0
 
 
 def _expected_versions(services: Services) -> dict[str, str]:

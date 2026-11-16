@@ -92,7 +92,7 @@ never scanned. Four are real misses, and all four share two causes.
 
 | # | Issue | Severity | Root cause | Owner |
 |---|-------|----------|------------|-------|
-| **A1** | The path scanners — `sqlmap`, `dalfox`, `ssti` — have produced **no findings in any scan since mid-October**. | **S1** | The URL list they download is deleted by the Karton garbage collector before they read it. | Spec A |
+| **A1** | The path scanners — `sqlmap`, `dalfox`, `ssti` — have produced **no findings in any scan since mid-October**, and the platform reports them as *"ran, found nothing"*. | **S1** | They are handed the crawler's links, filter them to the URLs that carry a parameter, and the filter leaves **nothing**: the crawler's haul for the laboratory has fifteen URLs and not one parameter. The scanner exits successfully having tested nothing, and the platform says it found nothing. | Spec A |
 | **A2** | The search endpoint of a single-page application is never tested, because the crawler's link list is filtered down to one parameterised URL and the API routes live in the JavaScript bundle. | **S1** | Nothing hands the routes the JavaScript role recovers to the scanners that can test them. | Spec A |
 | **A3** | The API surface of a JavaScript bundle is never stated as a finding. | **S1** | The bundle is read by one role; the routes are never converted into a finding. | Spec A |
 | **A4** | Two classes of finding are never produced: an unauthenticated disclosure whose evidence is the body content, and the reachability of a route. | **S3** | The finding-class taxonomy has no member for either. | Spec A |
@@ -114,6 +114,7 @@ never scanned. Four are real misses, and all four share two causes.
 | **C1** | The frontend has **no unit test suite** — only the Playwright browser check. | S3 | Add a JS test runner to CI. `tests/frontend/` holds 14 browser tests. |
 | **C2** | `mypy` is wired into CI but was **never run to completion locally**. | S3 | Run it and fix what it finds. |
 | **C3** | `dev/check_workers_one_by_one.py` **stops every worker** and restarts them one at a time. | S3 | Running it during a scan makes the workers vanish and the scan reports tools that never ran. |
+| **C4** | **The MongoDB container is killed under test load.** It has restarted **2038 times**; the last restarts were unclean kills during a test run, and the suite fails with `AutoReconnect: connection closed` whenever it creates a fresh test database. | S3 | Reproduced on the pristine tree, so it is not caused by the code. A previous crash (2026-11-02) was a WiredTiger *"No space left on device"*; the recent ones are unclean kills. The container also warns that its open-file limit is 1024 where 64000 is recommended. |
 
 ### 1.4 Group D — Agent lifecycle
 
@@ -146,80 +147,90 @@ is documented in full.
 
 ### 2.1 What happens
 
-The crawler (`katana`) uploads the URLs it found to the object store, under
-the key `{source}_{scan_id}_{encoded_target}`, and publishes a
-`paths`/`scan` task. Three scanners consume that task and download the list
-by that key.
+The crawler (`katana`) follows the links of the target and writes them to
+the `links` collection. It publishes a `paths`/`scan` task, and three
+scanners consume it: `sqlmap`, `dalfox` and `ssti`.
 
-The upload is a **raw S3 write**:
-
-```python
-# B-Hunters-Katana/katanam/katanam.py:101
-senddata = self.backend.upload_object(
-    "bhunters", "katana_" + scan_id + "_" + self.encode_filename(urlstripped), resultdata
-)
-```
-
-The platform's own benchmark harness does the same thing with its own client:
+Each of them reads the list and filters it down to the URLs that carry a
+parameter, because that is what it needs in order to test anything:
 
 ```python
-# b_hunters/platform/bench/workers.py:518
-client.put_object(Bucket=self.s3_bucket, Key=key, Body=body)
+# B-Hunters-DalFox/dalfox/dalfox.py:41-57
+p3 = subprocess.Popen(["grep", "-v", "png|jpg|css|js|gif|txt"], ...)
+p4 = subprocess.Popen(["grep", "="], ...)
+p5 = subprocess.Popen(["uro", "--filter", "hasparams"], ...)
+p6 = subprocess.Popen(["qsreplace", "FUZZ"], ...)
+newlinks = self.checklinksexist(self.subdomain, [...])
+if newlinks == []:
+    return [], []          # ← nothing to test: the scanner exits, successfully
 ```
 
-### 2.2 What deletes it
+### 2.2 What the filter leaves
 
-The Karton router runs a garbage collector. Verified in Karton v5.5.0,
-`karton/system/system.py`:
-
-```python
-GC_INTERVAL = 3 * 60
-
-def gc_collect_resources(self) -> None:
-    karton_bucket = self.backend.default_bucket_name      # "bhunters"
-    resources_to_remove = set(self.backend.list_objects(karton_bucket))
-    tasks = self.backend.iter_all_tasks()
-    for task in tasks:
-        for resource in task.iterate_resources():
-            if resource.bucket == karton_bucket and resource.uid in resources_to_remove:
-                resources_to_remove.remove(resource.uid)
-    if resources_to_remove:
-        self.backend.remove_objects(karton_bucket, resources_to_remove)
-```
-
-**Every object in the `bhunters` bucket that no registered task references is
-deleted, every three minutes.** The objects the workers write are raw S3
-writes: no task references them, so the collector takes them.
-
-### 2.3 The observation that confirms it
-
-`docs/misses.md` records it: *"a probe object was uploaded and gone within
-sixty seconds, and no object has survived in the bucket since the 29th of
-October."*
-
-Verified against the running stack during this audit:
+For the laboratory it leaves nothing. The crawler's haul for WebGoat is
+fifteen URLs, and not one of them carries a parameter:
 
 ```
-$ boto3 list_objects_v2(Bucket="bhunters")
-bhunters: 0 objects
+172.25.0.14:8080/WebGoat    crawled=15   with_params=0
 ```
 
-The bucket the three scanners read from is empty. The two workers that
-still produce findings — `nuclei` and `wapiti` — are the two that scan the
-target directly and never read the list. `ffuf`, the newest worker, produces
-its own inventory and does not read the list either.
+The seven links in the `links` document are four CSS files and three
+paths — `/WebGoat/registration`, `/WebGoat/login`, `/WebGoat/start.mvc` —
+and none of them contains a `=`. The `grep -v css` step removes the four
+style sheets and the `grep "="` step removes the other three.
 
-**The symptom in `docs/misses.md` — "sqlmap, dalfox and ssti produce nothing,
-in any scan, since the middle of October" — is fully explained by this.**
+### 2.3 What the scanner does with nothing
 
-### 2.4 Why the obvious fixes are wrong
+`newlinks == []` and the scanner returns immediately:
 
-| Tempting fix | Why it is wrong |
-|---------------|-----------------|
-| Disable the garbage collector | The object is then never reclaimed; the bucket grows without bound, and the leak is worse than the bug. |
-| Raise `--gc-interval` | Turns a systematic failure into a timing race. A scan that takes longer than the interval still fails. |
-| Point the scanners at a different bucket | The collector only ever touches `backend.default_bucket_name`. A second bucket would work — but it moves the problem rather than solving it, and the workers download from `"bhunters"` by a key they compute. |
-| **Make the object a tracked Karton resource** | **Correct.** A task that carries the resource keeps it alive for exactly as long as the scan needs it, and the collector removes it when the last task that used it finishes. The lifecycle becomes correct rather than suppressed. |
+```
+[2026-11-02 03:54:17,426] Starting processing new url
+[2026-11-02 03:54:17,426] [WARNING] katana 172.25.0.13:3000
+[2026-11-02 03:54:17,509] Task done
+```
+
+Eighty-three milliseconds. **It succeeded.** It tested nothing.
+
+### 2.4 What the platform said
+
+The participation table reported `ran, found nothing` — a false clean
+bill of health for work that never happened. This is the same class of
+defect as the one recorded for the agent roles in `STATUS.md` §7 #15:
+*"A role that was cut off looks like a role that found nothing."*
+
+### 2.5 The garbage collector is not the cause
+
+It is worth saying what the cause is **not**, because it was the first
+hypothesis and it is wrong.
+
+* The crawler already publishes the list as a Karton `LocalResource`
+  (`B-Hunters-Katana/katanam/katanam.py:144`), so the collector keeps it
+  for the life of the scan.
+* All three scanners already fall back to the database when the object
+  store copy has gone (`sqlmapm.py:166`, `dalfox.py:103`,
+  `sstichecker.py:63`), so they never depended on the object store at
+  all.
+* **An empty bucket after a scan has finished is the correct steady
+  state** — the collector removes the object when the last task that
+  referenced it is done.
+
+The bucket on the host's port 9000 was empty, but that is the **older**
+`bh-*` stack's bucket. The current platform's object store publishes no
+host port and is reachable only on the `bhunter` network. The
+observation that appeared to confirm the hypothesis was about the wrong
+stack.
+
+### 2.6 What has to change
+
+Two things, and they are separate:
+
+1. **The report must be honest.** A scanner that was handed nothing must
+   not be reported as one that found nothing. The platform already
+   computes the count — `candidates()` returns `urls_with_parameters` —
+   and `_status()` ignored it.
+2. **The scanners must be given something.** The routes that carry
+   parameters are in the JavaScript bundle, not in the links a crawler
+   follows. They have to be recovered and handed over.
 
 ---
 

@@ -2,11 +2,29 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the scanners that download the crawler's URL list produce findings again, and make the routes a single-page application hides in its JavaScript bundle reach both the scanners and the report.
+**Goal:** Make the scanners that are handed the crawler's URL list say so when they had nothing to test, and make the routes a single-page application hides in its JavaScript bundle reach both the scanners and the report.
 
-**Architecture:** The path list becomes a *tracked Karton resource* of the task that publishes it, so the garbage collector keeps it for exactly the life of the scan instead of deleting it. The platform then composes the complete list — crawled links, routes extracted from the JavaScript bundles, and routes the agent roles recovered — and publishes it as a second `paths`/`scan` task under `source="platform"`, using the same key convention the workers already compute.
+**Architecture:** Two separate defects. The first is a **reporting** defect: the platform computes how many of the crawler's URLs carry a parameter and then ignores it, so a scanner that was handed nothing is reported as one that found nothing. The second is a **coverage** defect: the routes that carry parameters are in the JavaScript bundle, not in the links a crawler follows, so the platform composes the merged list and publishes it as a second `paths`/`scan` task under `source="platform"`, using the key convention the workers already compute.
 
 **Tech Stack:** Python 3.12, Karton 5.5.0, MongoDB (pymongo), pytest 9, the existing `b_hunters.platform` package.
+
+## Correction to the first draft of this plan
+
+The first draft of this plan named the Karton garbage collector as the cause of
+the scanners producing nothing. **That was wrong**, and the error is recorded
+here rather than removed, because the same detour is easy to take again:
+
+* The crawler already publishes the list as a Karton `LocalResource`
+  (`B-Hunters-Katana/katanam/katanam.py:144`), so the collector keeps it.
+* All three scanners already fall back to the database when the object store
+  copy has gone (`sqlmapm.py:166`, `dalfox.py:103`, `sstichecker.py:63`).
+* An empty bucket after a scan has finished is the correct steady state.
+* The bucket that was observed empty was the **older** `bh-*` stack's. The
+  current platform's object store publishes no host port.
+
+The real cause is in Task 2. Task 1 is still worth doing — the platform's own
+benchmark harness writes its path list with a bare boto3 client, which is the
+same mistake in the one place where a new scanner is exercised first.
 
 ## Global Constraints
 
