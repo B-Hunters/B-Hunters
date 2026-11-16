@@ -1,4 +1,4 @@
-# B-Hunters 1.4.0 — what changed
+# B-Hunters 1.4.1 — what changed
 
 The release that gives the path scanners something to test, and that
 stops the platform from saying a scanner found nothing when it never
@@ -77,5 +77,13 @@ in `docs/superpowers/specs/`:
 | `2026-11-16-quality-gates-design.md` | the frontend tests, the type check, the destructive verification script, the database that is killed under load |
 | `2026-11-16-agent-lifecycle-design.md` | the roles that spend every round, the applications that cannot be scanned |
 | `2026-11-16-legacy-cli-report-design.md` | the legacy report, which reads the wrong collection |
+
+**The version.** The package carried a second copy of the version
+number, and the API answered the health check with a literal. Both
+drifted from the release — the package said 1.4.0 and the health check
+said 1.3.0, in the same image. There is now one version, and a test
+walks the source for a version literal so that a second copy cannot be
+added quietly. `1.4.1` is `1.4.0` with that fix; the scanning and the
+reporting are the same.
 
 The 1.3.0 notes are in `docs/release-notes-1.3.0.md`.
