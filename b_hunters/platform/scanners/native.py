@@ -36,6 +36,7 @@ from ..assets import classify, is_external, normalise_url
 from ..security.redact import redact_text
 from ..security.scope import ScopeEnforcer
 from .base import ScanRequest, ScanResult
+from .routes import as_urls, extract
 
 # The GraphQL adapter lives in its own module because it carries the
 # introspection query and the database error signature patterns.
@@ -654,6 +655,7 @@ async def asset_crawl_executor(request: ScanRequest) -> ScanResult:
     and is never stored.
     """
     assets: dict[str, dict[str, Any]] = {}
+    routes: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
     authorized = _authorized_hosts(request)
     seen: set[str] = set()
@@ -694,6 +696,27 @@ async def asset_crawl_executor(request: ScanRequest) -> ScanResult:
         item["kind"] = classify(content_type=document.content_type, url=url)
         item["preview"] = f"{document.status_code} {url}"
 
+        # The routes a bundle names are not links a crawler follows: they
+        # are strings inside the script.  The body is in hand, so they are
+        # read out of it here, while it is read for the references.
+        if item["kind"] == "js":
+            for route in extract(document.text):
+                for route_url in as_urls(route, _origin(url)):
+                    routes.setdefault(
+                        route_url,
+                        {
+                            "value": route_url,
+                            "kind": "api",
+                            "scope": "first_party",
+                            "status_code": 0,
+                            "content_type": "",
+                            "size_bytes": 0,
+                            "depth": item["depth"] + 1,
+                            "discovered_from": url,
+                            "preview": route.path,
+                        },
+                    )
+
         for reference in _extract_references(document.text):
             if len(assets) >= ASSET_LIMIT:
                 break
@@ -718,15 +741,28 @@ async def asset_crawl_executor(request: ScanRequest) -> ScanResult:
         ok=not errors,
         error="; ".join(errors[:5]),
         kind="url",
-        items=list(assets.values()),
+        items=list(assets.values()) + list(routes.values()),
         metadata={
             "assets": len(assets),
             "fetched": fetched,
             "external": sum(1 for item in assets.values() if item["scope"] == "external"),
             "targets_checked": len(request.targets),
             "max_depth": MAX_ASSET_DEPTH,
+            "api_routes": len(routes),
         },
     )
+
+
+def _origin(url: str) -> str:
+    """The scheme and the host of a URL.
+
+    A route is a path on the origin the bundle was served from, so the
+    origin is what the route is joined to.
+    """
+    parts = urlsplit(url)
+    if not parts.scheme or not parts.netloc:
+        return ""
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 def _asset_item(url: str, *, depth: int, discovered_from: str) -> dict[str, Any]:

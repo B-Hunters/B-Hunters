@@ -255,5 +255,63 @@ async def test_the_crawler_is_registered():
     assert specs["asset_crawl"].description
 
 
+@pytest.mark.asyncio
+async def test_the_routes_a_bundle_names_are_recorded(monkeypatch):
+    """The routes of a single-page application are not links.
+
+    A crawler follows links; the API surface of a single-page
+    application is in its script.  The body is read for the references
+    anyway, so the routes are read out of it in the same place.
+    """
+    bundle = (
+        'search(t){return this.http.get('
+        '`${this.hostServer}/rest/products/search?q=${t}`)}'
+    )
+    pages = {"https://demo.test/main.js": bundle}
+    web = MockWeb(pages)
+    web.install(monkeypatch)
+    scope = RecordingScope(pages)
+    request = _request(scope, targets=["https://demo.test/main.js"])
+
+    result = await asset_crawl_executor(request)
+
+    items = {entry["value"]: entry for entry in result.items}
+    assert "https://demo.test/rest/products/search?q=" in items
+    assert items["https://demo.test/rest/products/search?q="]["kind"] == "api"
+    assert items["https://demo.test/rest/products/search?q="]["discovered_from"] == (
+        "https://demo.test/main.js"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_route_is_not_counted_against_the_asset_limit(monkeypatch):
+    """The routes are not pages, so the crawl does not stop for them."""
+    bundle = "".join(f'get("/api/r{index}");' for index in range(10))
+    pages = {"https://demo.test/main.js": bundle}
+    web = MockWeb(pages)
+    web.install(monkeypatch)
+    scope = RecordingScope(pages)
+    monkeypatch.setattr(native, "ASSET_LIMIT", 1)
+    request = _request(scope, targets=["https://demo.test/main.js"])
+
+    result = await asset_crawl_executor(request)
+
+    assert result.metadata["api_routes"] == 10
+
+
+@pytest.mark.asyncio
+async def test_a_page_is_not_read_for_routes(monkeypatch):
+    """Only a script carries routes."""
+    pages = {"https://demo.test/": '<a href="/x">x</a> get("/api/y");'}
+    web = MockWeb(pages)
+    web.install(monkeypatch)
+    scope = RecordingScope(pages)
+    request = _request(scope, targets=["https://demo.test/"])
+
+    result = await asset_crawl_executor(request)
+
+    assert result.metadata["api_routes"] == 0
+
+
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__])
