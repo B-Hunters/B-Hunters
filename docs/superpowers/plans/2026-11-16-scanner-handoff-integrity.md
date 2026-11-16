@@ -564,7 +564,7 @@ git commit -m "fix(bench): the path list is published with the task that carries
 
 ---
 
-### Task 4: The routes a bundle hides
+### Task 4: The routes a bundle hides  *(done)*
 
 **Files:**
 - Create: `b_hunters/platform/scanners/routes.py`
