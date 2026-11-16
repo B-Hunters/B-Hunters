@@ -55,7 +55,7 @@ same mistake in the one place where a new scanner is exercised first.
 
 ---
 
-### Task 1: The artefact outlives the collector
+### Task 1: The artefact is a task resource  *(done — `235558e`)*
 
 **Files:**
 - Create: `b_hunters/artifacts.py`
@@ -285,7 +285,50 @@ The artefact is now a resource of the task that publishes it."
 
 ---
 
-### Task 2: The crawler publishes its list through the helper
+### Task 2: The platform says a path scanner had nothing to test  *(done — `078f6fa`)*
+
+**Files:**
+- Modify: `b_hunters/platform/scanners/worker_output.py` (`PATH_SCANNERS`, `_status`)
+- Modify: `b_hunters/platform/db/assets.py` (`WorkerRunRepository.record`)
+- Modify: `b_hunters/platform/agents/orchestrator.py` (`_record_worker_outcomes`, `_candidate_count`)
+- Modify: `b_hunters/platform/api/routers/assets.py` (`_reason_for`, the docstring)
+- Modify: `docs/verification.md`
+- Test: `tests/unit/test_path_scanner_reason.py`
+
+**Interfaces:**
+- Consumes: `worker_output.candidates(database, report) -> dict[str, int]` (existing).
+- Produces:
+  - `worker_output.PATH_SCANNERS: tuple[str, ...]` — the workers that test the candidate list
+  - `worker_output._status(tasks, found, live_tasks, *, worker: str = "", candidates: int = 0) -> str`
+  - `WorkerRunRepository.record(..., candidates: int = 0) -> dict[str, Any]`
+  - `assets._had_nothing_to_test(run: dict[str, Any]) -> bool`
+
+**Why this is the task that matters.** The scanners are handed the crawler's
+links and filter them to the URLs that carry a parameter. For the laboratory
+the filter leaves nothing — fifteen URLs crawled, none with a parameter — so
+the scanner exits in eighty-three milliseconds having tested nothing, and the
+platform says *"ran, found nothing"*. The count was already computed by
+`candidates()` and thrown away by `_status()`.
+
+**Steps.**
+
+- [x] **Step 1: Write the failing test** — `tests/unit/test_path_scanner_reason.py`, asserting that a path scanner with no candidates is reported as `ran, had nothing to test`, and that a worker which is not a path scanner is unaffected.
+- [x] **Step 2: Run it to verify it fails** — fails: the reason is `ran, found nothing`.
+- [x] **Step 3: Add `PATH_SCANNERS` and the candidate count to `_status`.**
+- [x] **Step 4: Record the count with the worker's outcome** — `record(..., candidates=...)`, and the orchestrator computes it once per scan.
+- [x] **Step 5: Use it in the reason** — `assets._reason_for()`.
+- [x] **Step 6: Document it** — the API docstring and `docs/verification.md`.
+- [x] **Step 7: Run the suite** — `pytest tests/unit -q` → 452 passed.
+- [x] **Step 8: Commit** — `078f6fa`.
+
+### Task 2a: The crawler publishes its list through the helper  *(not needed)*
+
+The crawler already does this: `B-Hunters-Katana/katanam/katanam.py:144`
+publishes the list as a Karton `LocalResource`, so the collector keeps it for
+the life of the scan. The first draft of this plan proposed changing it; the
+worker was read and it was already correct.
+
+
 
 **Files:**
 - Modify: `/home/sniper/pentest/repos/B-Hunters-Katana/katanam/katanam.py`
@@ -419,7 +462,7 @@ the scanners found nothing."
 
 ---
 
-### Task 3: The benchmark harness publishes its list the same way
+### Task 3: The benchmark harness publishes its list the same way  *(the mechanism is in place — `235558e`; the call site is left)*
 
 **Files:**
 - Modify: `b_hunters/platform/bench/workers.py`
