@@ -1,118 +1,81 @@
-# B-Hunters 1.3.0 — what changed
+# B-Hunters 1.4.0 — what changed
 
-The release that makes the platform able to do the things it could
-only describe before: log in, confirm a blind finding, judge what it
-found, tell the operator, and be driven from a pipeline.
+The release that gives the path scanners something to test, and that
+stops the platform from saying a scanner found nothing when it never
+looked at anything.
 
 ## The scanning
 
-**The login.** The platform can now log in as an identity, keep the
-session and use it for the rest of the scan. The recorder drives a
-browser whose every request is checked against the scan's scope before
-it leaves, and the service worker is blocked — a service worker is a
-second network stack inside the page that the request hook does not
-see. `docs/authenticated-scanning.md`.
+**The routes a bundle hides.** The REST surface of a single-page
+application is not a set of links: it is strings inside the JavaScript
+bundle. A crawler follows links, so it never sees them, and a scanner
+that tests parameters has nothing to test. Against the running Juice
+Shop the crawler now recovers **111 routes** from the 1.2 MB bundle,
+among them the endpoint the benchmark had recorded as missed:
 
-**The preflight.** A scan that names an identity checks the session
-*before* it runs, and refreshes it if it has expired. A scan that
-finds out in the worker phase that its session has expired spends the
-whole worker phase on a target it cannot reach.
-
-**The comparison.** A scan may name two identities. The `compare_access`
-tool makes the same request as each of them: an object-level
-authorisation flaw is invisible to a single session, because the request
-that is refused to you is the request that is allowed to somebody else.
-
-**The browser.** The agents have a browser of their own, and a
-`browser_crawl` adapter that crawls the target the way a *page* uses it:
-the links it carries, the endpoints it fetches over XHR or fetch, and
-the hash routes it navigates to. There is no action that reads the
-session and no action that runs JavaScript in the page.
-
-**The callbacks.** A blind vulnerability is confirmed by the target
-reaching back. The platform runs its own callback service — the only
-part of it exposed to the outside world, answering on one path and on
-nothing else. `docs/oast.md`.
-
-## The findings
-
-**One name for each kind of vulnerability.** The scans had produced
-seventy-eight spellings of about twenty kinds of vulnerability. The
-class is normalised when a finding is stored, and the original text is
-kept beside it: the same issue is one issue everywhere — in the
-triage view, in the fingerprint and in the score.
-
-**A judge rules; it does not propose.** The adjudicator had been
-putting the same defect into the report twice: once as the tool found
-it, with a verdict, and once as the judge found it, without one. The
-adjudicator's schema has no `findings` array now, and the orchestrator
-never stores a judging role's findings.
-
-**A cut-off role keeps what it found.** The findings of a role travel
-in its final answer, and a role that ran out of time never gave one.
-What the role last said is now read as its answer.
-
-**The budget.** A reasoning model spends about 150 seconds and 150,000
-tokens on a role, so twelve roles need nine minutes of agent time on
-their own. The roles are admitted in the order of their yield, the
-judging roles keep half of the agent budget, and the worker phase and
-the agent phase split the scan evenly.
-
-## The operator
-
-**The triage.** The issue, not the occurrence, carries the state: it
-can be triaged, bulk-triaged, commented on, and its history read. An
-issue that is seen again reopens, and the reopen is recorded.
-
-**The notifications.** A webhook, signed with a shared secret when one
-is configured. Every delivery is recorded, whether it worked or not.
-
-**The API token.** A pipeline authenticates with a token instead of a
-browser session. It is stored as a hash, so a dump of the database is
-not a way in.
-
-**The CI entry point.**
-
-```bash
-b-hunters ci scan --target https://demo.test/ --token "$BHUNTERS_API_TOKEN" --fail-on high
+```
+GET /rest/products/search  params=('q',)
+  -> http://172.25.0.13:3000/rest/products/search?q=
 ```
 
-The exit code is the point: zero when nothing was found at or above the
-threshold, one when there was.
+The routes are read out of the bundle statically. Nothing is executed
+and nothing is fetched. A template literal is handled, so a route
+written as `` `${this.hostServer}/rest/products/search?q=${t}` `` is
+recovered with its parameter, and the result is the form the scanner's
+own filter keeps and can vary.
 
-**The trend.** The open issues by severity, what was new and what was
-closed per week, the rate at which the findings are verified, and the
-mean time to triage — all per issue, not per occurrence.
+**The routes are recorded where the console shows them.** They are
+written into the asset inventory as `api` assets, with the bundle they
+came from. They are not pages: they are never fetched, and they do not
+count against the crawl's limit.
 
-## The fleet
+## The reporting
 
-**`gospider` is retired.** The project has not been committed to since
-April 2024, and `katana` — its successor — was already in the fleet.
+**A scanner that was handed nothing is not a scanner that found
+nothing.** The path scanners filter the crawler's list down to the URLs
+that carry a parameter. For the laboratory the filter left **nothing** —
+fifteen URLs crawled, none with a parameter — so the scanner exited in
+eighty-three milliseconds having tested nothing, and the platform
+reported it as *"ran, found nothing"*.
 
-**`ffuf` takes its place.** It mutates a value in a request, which is
-what an object-level authorisation flaw needs: the other tools
-enumerate names and paths, this one changes what is asked for.
+That was a false clean bill of health for work that never happened. The
+count was already computed by `candidates()` and thrown away by
+`_status()`. It is now recorded with the worker's outcome, and there is
+a sixth reason:
 
-**The workers are bounded.** sqlmap was pointed at the root of the
-target and asked for level 1 and risk 1, which is the shallowest
-setting it has; it now crawls, asks for more and ignores the 401s of
-an application that answers them. Every worker has a rate, a
-concurrency and a timeout.
+| Reason | Meaning |
+|---|---|
+| `ran, had nothing to test` | it is a path scanner, it ran, it produced no finding, and the crawler found no URL with a parameter for it to test |
 
-**The images are built against the shared class of this repository.**
-The published release does not have the `auth_headers` helper the
-workers call, and a worker that fails on it fails *inside* a scan.
-`scripts/build_workers.sh`.
+This is the same rule the platform already applies to the agent roles,
+where a role that was cut off by the deadline must not look like a role
+that found nothing.
 
-## The measurements
+## The artefacts
 
-| | Before | After |
-|---|---|---|
-| Roles that completed | 0 | **12 of 12** |
-| The verifier, the role that judges | never started | completed |
-| The adjudicator | never started | completed, 10 rounds |
-| Findings with a verdict | 0 | 9 of 9 |
-| The roles that did not run | 12, unexplained | 0 |
+**A published artefact is a task resource.** The platform's benchmark
+harness wrote the path list with a bare S3 client, so no task referenced
+it and the Karton collector removed it. The mechanism now lives in
+`b_hunters/artifacts.py`, with the key convention in one place, and a
+test asserts that it agrees with the workers' own `encode_filename` —
+byte for byte, including the shortening of a very long name. A producer
+that names an artefact differently writes to a key the consumer never
+reads.
 
-Two of the seven findings the adjudicator judged came back **rejected**
-— and both rejections were right.
+## The documentation
+
+The architecture audit was written against the upstream organisation and
+is six months behind the running system. The issue list has been
+rebased against the running system, and the specs for what is left are
+in `docs/superpowers/specs/`:
+
+| Spec | Covers |
+|---|---|
+| `2026-11-16-rebaseline-design.md` | the issue list, and the root cause of the scanners that produced nothing |
+| `2026-11-16-scanner-handoff-integrity-design.md` | the scanner handoff, the routes, the finding classes |
+| `2026-11-16-supply-chain-and-secrets-design.md` | the committed binary, the credentials, the licences |
+| `2026-11-16-quality-gates-design.md` | the frontend tests, the type check, the destructive verification script, the database that is killed under load |
+| `2026-11-16-agent-lifecycle-design.md` | the roles that spend every round, the applications that cannot be scanned |
+| `2026-11-16-legacy-cli-report-design.md` | the legacy report, which reads the wrong collection |
+
+The 1.3.0 notes are in `docs/release-notes-1.3.0.md`.
