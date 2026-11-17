@@ -115,6 +115,15 @@ def _host_from_url(url: str) -> str:
 
 
 def _is_valid_host(host: str) -> bool:
+    """Is this a host the platform can authorise?
+
+    A leading wildcard is allowed.  ``*.example.com`` is how a bug
+    bounty programme covers a domain - the scope engine matches that
+    form, and the exclusions are expressed against it - so the
+    validator must not be stricter than the matcher.  A validator that
+    rejects the wildcard makes it impossible to say what the scan
+    covers.
+    """
     if not host or len(host) > 253:
         return False
     if host.replace(".", "").isdigit():
@@ -123,6 +132,11 @@ def _is_valid_host(host: str) -> bool:
     labels = host.split(".")
     if not labels or len(labels) > 8:
         return False
+    if labels[0] == "*":
+        # The wildcard covers the subdomains of the domain behind it.
+        labels = labels[1:]
+        if not labels:
+            return False
     return all(_LABEL.match(label) for label in labels)
 
 
