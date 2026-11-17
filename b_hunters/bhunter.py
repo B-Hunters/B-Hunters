@@ -15,6 +15,15 @@ from bson import ObjectId
 from karton.core import Config, Karton
 
 
+class ScopeViolation(Exception):
+    """A worker was asked to scan a host the scan excludes.
+
+    The scan names the hosts it must not touch - the out-of-scope
+    assets of a bug bounty programme - and a worker that reached one
+    anyway would be testing a host nobody authorised.
+    """
+
+
 class BHunters(Karton):
     def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
         # The configuration comes from the environment: the workers are
@@ -31,6 +40,11 @@ class BHunters(Karton):
         self.db=self.monogocon()
 
     def update_task_status(self,url,status):
+        if status == "Started":
+            # The one place every worker passes through before it
+            # touches the target.  A host the scan excludes is refused
+            # here, so the worker stops before it sends a request.
+            self.assert_in_scope(url)
         self.waitformongo()
         collection=self.db["domains"]
         if status == "Started":
@@ -129,6 +143,58 @@ class BHunters(Karton):
 
     def is_array(self,var):
         return isinstance(var, list)
+
+    # ------------------------------------------------------------------
+    # The exclusions of the scan
+    # ------------------------------------------------------------------
+    def denied_hosts(self):
+        """The hosts the scan must not touch.
+
+        The list travels with the task, so every worker inherits it -
+        and the workers are separate containers that discover hosts of
+        their own.  A bug bounty programme names the assets that are out
+        of scope, and the discovery worker hands every subdomain it
+        finds to the rest of the fleet: without this, a worker would
+        scan a host the scan was told to leave alone.
+        """
+        task = getattr(self, "current_task", None)
+        if task is None:
+            return ()
+        raw = (task.payload_persistent or {}).get("denied_hosts") or ()
+        if isinstance(raw, str):
+            raw = [raw]
+        return tuple(str(host).strip().lower() for host in raw if str(host).strip())
+
+    def is_denied_host(self, host):
+        """Whether a host is one of the scan's exclusions."""
+        from b_hunters.platform.security.scope import host_matches
+
+        candidate = str(host or "").strip().lower()
+        if not candidate:
+            return False
+        candidate = candidate.split("://", 1)[-1]
+        candidate = candidate.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+        if "@" in candidate:
+            candidate = candidate.rsplit("@", 1)[1]
+        candidate = candidate.split(":", 1)[0]
+
+        return any(host_matches(candidate, pattern) for pattern in self.denied_hosts())
+
+    def assert_in_scope(self, host):
+        """Refuse to scan a host the scan excludes.
+
+        Every worker calls ``update_task_status(host, "Started")``
+        before it touches the target, so this is the one place the
+        refusal has to be: the worker stops before it sends a single
+        request to a host it was not authorised to test.
+        """
+        if self.is_denied_host(host):
+            raise ScopeViolation(
+                f"{host} is out of scope for this scan "
+                f"(denied: {', '.join(self.denied_hosts())})"
+            )
+        return True
+
     def is_local_ip(self, ip_address):
         """Return True when the address must not be scanned.
 

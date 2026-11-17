@@ -39,7 +39,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from bson import ObjectId
 
@@ -153,6 +153,11 @@ class WorkerTarget:
     #: The session of the identity the scan names: the cookies and the
     #: headers the workers pass to their tools.
     auth: dict[str, Any] = field(default_factory=dict)
+    #: The hosts the scan must not touch.  The workers are separate
+    #: containers and they discover hosts of their own, so the
+    #: exclusions have to travel with the task - otherwise a worker
+    #: scans an out-of-scope asset the scan was told to leave alone.
+    denied_hosts: tuple[str, ...] = ()
 
 
 @dataclass
@@ -194,7 +199,14 @@ class KartonWorkerBridge:
     # ------------------------------------------------------------------
     # Publishing
     # ------------------------------------------------------------------
-    def prepare(self, *, url: str, description: str = "", platform_scan_id: str = "") -> WorkerTarget:
+    def prepare(
+        self,
+        *,
+        url: str,
+        description: str = "",
+        platform_scan_id: str = "",
+        denied_hosts: Sequence[str] = (),
+    ) -> WorkerTarget:
         """Create the legacy scan document for a target.
 
         The workers look the scan up by the identifier of this document
@@ -226,6 +238,7 @@ class KartonWorkerBridge:
             domain=domain,
             legacy_scan_id=str(scan_oid),
             platform_scan_id=platform_scan_id,
+            denied_hosts=tuple(str(h).strip().lower() for h in denied_hosts if str(h).strip()),
         )
 
     def online_identities(self) -> list[str]:
@@ -344,6 +357,12 @@ class KartonWorkerBridge:
         task.add_payload("scan_id", target.legacy_scan_id, persistent=True)
         task.add_payload("data", target.domain)
         task.add_payload("source", "producer")
+        if target.denied_hosts:
+            # The hosts the scan must not touch.  Persistent, so that the
+            # whole subtree inherits them: the discovery worker hands
+            # every subdomain it finds to the rest of the fleet, and a
+            # worker must refuse the ones that are out of scope.
+            task.add_payload("denied_hosts", list(target.denied_hosts), persistent=True)
         if target.auth:
             # The session of the identity the scan names.  The workers
             # read it from the task and pass it to their tools; it is

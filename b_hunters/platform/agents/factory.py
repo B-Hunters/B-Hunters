@@ -116,6 +116,7 @@ def build_scan_context(scan: ScanRecord, settings: Settings) -> ScanContext:
         name=scan.name,
         targets=list(definition.get("targets", [])),
         authorized_hosts=list(scope.get("authorized_hosts", [])),
+        denied_hosts=list(scope.get("denied_hosts", [])),
         excluded_paths=list(scope.get("excluded_paths", [])),
         profile=profile,
         test_accounts=list(definition.get("test_accounts", [])),

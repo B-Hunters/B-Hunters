@@ -429,6 +429,11 @@ class ScanContext:
     targets: list[str]
     authorized_hosts: list[str]
     excluded_paths: list[str] = field(default_factory=list)
+    #: The hosts the scan must not touch, even though the authorised
+    #: list covers them.  A bug bounty programme names its out-of-scope
+    #: assets, and a wildcard is the usual way of covering a domain -
+    #: so the exclusions are said separately and travel to the workers.
+    denied_hosts: list[str] = field(default_factory=list)
     profile: ScanProfile = field(default_factory=ScanProfile.default)
     test_accounts: list[dict[str, Any]] = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)
@@ -449,6 +454,7 @@ class ScanContext:
             allow_private_network=self.allow_private_network,
             allow_http=True,
             allow_state_changing=self.allow_state_changing,
+            denied_hosts=self.denied_hosts,
             max_requests_per_second=self.max_requests_per_second,
             max_concurrency=self.profile.max_concurrency,
             max_duration_seconds=self.max_duration_seconds,
@@ -1181,6 +1187,7 @@ class ScanOrchestrator:
                 url=url,
                 description=context.name,
                 platform_scan_id=context.scan_id,
+                denied_hosts=context.denied_hosts,
             )
             # The session of the identity the scan names travels with
             # the task, so that the workers scan the authenticated

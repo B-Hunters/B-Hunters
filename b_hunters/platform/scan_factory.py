@@ -73,6 +73,7 @@ def build_scan(
     profile: ScanProfile,
     accepted_urls: list[str],
     authorized_hosts: list[str],
+    denied_hosts: list[str] | None = None,
     description: str = "",
     created_by: str = "",
     created_by_id: str = "",
@@ -107,6 +108,7 @@ def build_scan(
     }
     scope: dict[str, Any] = {
         "authorized_hosts": list(authorized_hosts),
+        "denied_hosts": [str(h).strip().lower() for h in (denied_hosts or []) if str(h).strip()],
         "excluded_paths": excluded_paths,
         "allow_private_network": test_environment,
         "allow_state_changing": bool(payload.get("allow_state_changing", False)),

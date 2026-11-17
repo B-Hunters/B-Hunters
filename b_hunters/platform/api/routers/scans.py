@@ -40,6 +40,11 @@ class ScanTargets(BaseModel):
     start_paths: list[str] = Field(default_factory=list)
     url_lists: list[str] = Field(default_factory=list)
     excluded_paths: list[str] = Field(default_factory=list)
+    #: The hosts the scan must not touch, even though a wildcard in the
+    #: authorised list covers them.  A bug bounty programme names the
+    #: assets that are out of scope, and a wildcard is the usual way of
+    #: covering a domain - so the exclusions have to be said separately.
+    denied_hosts: list[str] = Field(default_factory=list)
 
 
 class ScanRequestModel(BaseModel):
@@ -128,6 +133,7 @@ def _validate_scope(
     excluded_paths: list[str],
     allow_private_network: bool,
     allow_state_changing: bool,
+    denied_hosts: list[str] | None = None,
     strict: bool = True,
 ) -> dict[str, Any]:
     """Validate that every target is covered by the authorised host list.
@@ -156,6 +162,7 @@ def _validate_scope(
         allow_private_network=allow_private_network,
         allow_http=True,
         allow_state_changing=allow_state_changing,
+        denied_hosts=denied_hosts or [],
     )
     enforcer = ScopeEnforcer(policy)
 
@@ -189,6 +196,7 @@ def _validate_scope(
 
     return {
         "authorized_hosts": hosts,
+        "denied_hosts": [str(h).strip().lower() for h in (denied_hosts or []) if str(h).strip()],
         "accepted_urls": accepted,
         "out_of_scope": out_of_scope,
         "policy": policy,
@@ -377,6 +385,7 @@ async def create_scan(
         excluded_paths=payload.targets.excluded_paths,
         allow_private_network=payload.test_environment,
         allow_state_changing=payload.allow_state_changing,
+        denied_hosts=payload.targets.denied_hosts,
     )
     profile = _profile_for(
         payload.profile,
@@ -406,6 +415,7 @@ async def create_scan(
         profile=profile,
         accepted_urls=result["accepted_urls"],
         authorized_hosts=result["authorized_hosts"],
+        denied_hosts=result["denied_hosts"],
         description=payload.description,
         created_by=user.username,
         created_by_id=user.user_id,

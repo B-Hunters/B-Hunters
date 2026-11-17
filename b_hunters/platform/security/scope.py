@@ -147,6 +147,16 @@ def _host_matches(host: str, pattern: str) -> bool:
     return host == pattern
 
 
+def host_matches(host: str, pattern: str) -> bool:
+    """Match *host* against *pattern*, supporting a leading ``*.``.
+
+    The public face of the matcher, so that the shared base class of the
+    workers can use the same rule the platform uses: a ``*.example.com``
+    pattern matches the subdomains of ``example.com`` and not the apex.
+    """
+    return _host_matches(_normalize_host(host), _normalize_host(pattern))
+
+
 def is_blocked_ip(ip: str) -> bool:
     """Return ``True`` when *ip* belongs to a range that must not be reached."""
     try:
