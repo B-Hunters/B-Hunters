@@ -1,4 +1,4 @@
-# B-Hunters 1.4.1 — what changed
+# B-Hunters 1.5.0 — what changed
 
 The release that gives the path scanners something to test, and that
 stops the platform from saying a scanner found nothing when it never
@@ -85,5 +85,30 @@ said 1.3.0, in the same image. There is now one version, and a test
 walks the source for a version literal so that a second copy cannot be
 added quietly. `1.4.1` is `1.4.0` with that fix; the scanning and the
 reporting are the same.
+
+## The scope
+
+**A scan can name the hosts it must not touch.** A bug bounty programme
+names the assets that are out of scope, and the wildcard that covers the
+domain covers them too — so the exclusions have to be said separately,
+or a scan of `*.rapyd.net` would touch `support.rapyd.net`, which the
+programme rules out explicitly.
+
+They are enforced in two places, because the workers are separate
+containers that discover hosts of their own: the platform refuses the
+target outright, and the workers inherit the list with the task and
+refuse the host before they send their first request.
+
+**A wildcard is a host the platform can authorise.** The scope engine
+has always matched `*.example.com` — the form a programme uses to cover
+a domain — but the API's validator rejected it, so the most useful way
+of expressing a scope could never be said. `docs/configuration.md` §7.
+
+## The load
+
+**The load a worker puts on a target is the operator's choice.** sqlmap,
+dalfox and the template scanner each had a fixed number of requests in
+flight. A scan of a laboratory and a scan of a production asset are not
+the same job.
 
 The 1.3.0 notes are in `docs/release-notes-1.3.0.md`.

@@ -262,3 +262,55 @@ See `docs/agent-authoring.md` for the full contract.
 
 The only exception is `BHUNTERS_CONFIG`, which selects the INI file
 itself.
+
+---
+
+## 7. The scope of a scan
+
+The scope is what the scan is allowed to touch. It is fixed when the
+scan is created, and it has three parts.
+
+| Part | Where | Meaning |
+|---|---|---|
+| the authorised hosts | `targets.authorized_hosts` | the hosts the scan may touch |
+| the excluded paths | `targets.excluded_paths` | the paths on those hosts the scan must not request |
+| the denied hosts | `targets.denied_hosts` | the hosts the scan must not touch, even though a wildcard covers them |
+
+A host may be named exactly (`api.example.com`) or with a leading
+wildcard (`*.example.com`), which covers the subdomains of the domain
+behind it and **not** the apex — so the apex has to be named as well.
+
+### The denied hosts, and why they are separate
+
+A bug bounty programme names the assets that are out of scope. The
+wildcard that covers the domain covers them too:
+
+```
+in scope      *.rapyd.net
+out of scope  community.rapyd.net, support.rapyd.net, docs.rapyd.net,
+              sandbox.rapyd.net, ghost.rapyd.net
+```
+
+So the exclusions have to be said separately, or a scan of `*.rapyd.net`
+would touch `support.rapyd.net` — which the programme rules out
+explicitly.
+
+They are enforced in two places, because the workers are separate
+containers that discover hosts of their own:
+
+* the **platform** refuses the target outright, and its own adapters
+  never request a denied host;
+* the **workers** inherit the list with the task and refuse the host
+  before they send their first request.
+
+### An example
+
+```json
+{
+  "targets": {
+    "urls": ["https://example.com/"],
+    "authorized_hosts": ["*.example.com", "example.com"],
+    "denied_hosts": ["community.example.com", "support.example.com"]
+  }
+}
+```
