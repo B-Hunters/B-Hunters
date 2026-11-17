@@ -392,6 +392,10 @@ services:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+      # How many requests sqlmap may have in flight.  A scan of a
+      # laboratory and a scan of a production asset are not the same
+      # job, and the operator decides.
+      - process_num=${SQLMAP_PROCESSES:-15}
     depends_on:
       - karton-system
     networks:
@@ -406,6 +410,8 @@ services:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+      # How many requests dalfox may have in flight.
+      - workers_num=${DALFOX_WORKERS:-50}
     depends_on:
       - karton-system
     networks:
@@ -543,6 +549,8 @@ services:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
+      # How many requests the template scanner may have in flight.
+      - process_num=${SSTI_PROCESSES:-15}
     depends_on:
       - karton-system
     networks:
