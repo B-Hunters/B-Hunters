@@ -33,6 +33,9 @@ from .scan_factory import create_scan_from_template
 
 log = logging.getLogger(__name__)
 
+#: How often the retention job runs, in seconds.
+RETENTION_INTERVAL_SECONDS = 3600
+
 #: The kinds of job the runner claims.
 RUNNER_JOB_KINDS = ("scan", "benchmark")
 
@@ -371,6 +374,7 @@ class Runner:
 
     async def run_forever(self) -> None:
         """Run jobs until the runner is drained."""
+        last_retention = 0.0
         while not self._drained:
             if self._drain_requested():
                 log.info("the runner was asked to drain; it will not claim new jobs")
@@ -379,6 +383,28 @@ class Runner:
             result = await self.run_once()
             if result is None:
                 await asyncio.sleep(self.config.poll_seconds)
+            # The retention job is what keeps the database from growing
+            # for ever.  It was written and never called, so every scan
+            # left its events, its artefacts and its sessions behind.
+            now = time.time()
+            if now - last_retention >= RETENTION_INTERVAL_SECONDS:
+                last_retention = now
+                self.apply_retention()
+
+    def apply_retention(self) -> dict[str, int]:
+        """Delete the events and the artefacts that have expired."""
+        settings = self.services.settings
+        try:
+            removed = self.services.db.apply_retention(
+                event_retention_days=settings.event_retention_days,
+                artifact_retention_days=settings.artifact_retention_days,
+            )
+        except Exception:  # pragma: no cover - the database may be down
+            log.exception("could not apply the retention policy")
+            return {}
+        if any(removed.values()):
+            log.info("retention removed %s", removed)
+        return removed
 
     def drain(self) -> None:
         """Stop claiming new jobs.  The job in flight is allowed to finish."""
