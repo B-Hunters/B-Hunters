@@ -51,6 +51,13 @@ log = logging.getLogger(__name__)
 # Asset collection limits
 # ----------------------------------------------------------------------
 #: The most assets one scan records.
+
+#: The status codes that mean the target has refused the scan.
+#:
+#: A 403 is an edge that has said no.  Asking again is the traffic that
+#: turns a refusal into a block, and a scan that keeps going against a
+#: refusal is a scan that is not being careful.
+REFUSAL_STATUS_CODES = frozenset({403, 401, 406})
 ASSET_LIMIT = 2000
 #: How far from a seed the crawler walks.
 MAX_ASSET_DEPTH = 3
@@ -669,6 +676,10 @@ async def asset_crawl_executor(request: ScanRequest) -> ScanResult:
         queue.append((raw, url, 0, ""))
 
     fetched = 0
+    #: The hosts that have refused the scan.  A host that answers 403 has
+    #: said no; the crawl stops asking it, rather than becoming the
+    #: traffic that gets it blocked for good.
+    refused: set[str] = set()
     while queue:
         if len(assets) >= ASSET_LIMIT:
             break
@@ -679,6 +690,12 @@ async def asset_crawl_executor(request: ScanRequest) -> ScanResult:
             # The target itself is not covered by the authorised scope.
             # It is recorded, but the scope decides whether it is fetched.
             item["scope"] = "external"
+
+        host = urlsplit(url).hostname or ""
+        if host in refused:
+            # The host has already refused.  The reference is recorded
+            # and nothing more is asked of it.
+            continue
 
         document = await _fetch_document(raw, request)
         if not document.allowed:
@@ -695,6 +712,14 @@ async def asset_crawl_executor(request: ScanRequest) -> ScanResult:
         item["size_bytes"] = document.size_bytes
         item["kind"] = classify(content_type=document.content_type, url=url)
         item["preview"] = f"{document.status_code} {url}"
+
+        if document.status_code in REFUSAL_STATUS_CODES and host:
+            # The target's edge has refused the scan.  Everything else on
+            # this host would be refused too, and asking again is the
+            # traffic that turns a refusal into a block.
+            refused.add(host)
+            errors.append(f"{url}: the target refused the scan ({document.status_code})")
+            item["refused"] = True
 
         # The routes a bundle names are not links a crawler follows: they
         # are strings inside the script.  The body is in hand, so they are
