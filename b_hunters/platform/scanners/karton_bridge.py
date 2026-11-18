@@ -273,8 +273,8 @@ class KartonWorkerBridge:
             log.debug("could not read the online consumers: %s", exc)
             return []
 
-        for queue in self._queues():
-            identity = identity_from_queue(queue)
+        for name, queue in self._queues():
+            identity = identity_from_queue(name)
             # A bound queue is not a running worker.  The router knows
             # how many consumers are listening to each identity, and a
             # queue nobody is listening to is a bind left behind by a
@@ -284,13 +284,13 @@ class KartonWorkerBridge:
                 identities.add(identity)
         return sorted(name for name in identities if name)
 
-    def _queues(self) -> list[Any]:
+    def _queues(self) -> list[tuple[str, Any]]:
         """The queues the workers are bound to, with their consumers."""
         try:
             from karton.core.inspect import KartonState
 
             state = KartonState(self.producer.backend)
-            return list(state.queues.values())
+            return list(state.queues.items())
         except Exception as exc:  # pragma: no cover - the backend may blip
             log.debug("could not read the bound queues: %s", exc)
             return []
