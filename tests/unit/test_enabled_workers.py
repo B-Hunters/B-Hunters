@@ -102,3 +102,18 @@ def test_a_scan_that_said_nothing_runs_every_worker():
     worker = _Worker("B-Hunters-SQLMap")
 
     assert worker.is_enabled_for_scan() is True
+
+
+def test_the_check_works_before_the_task_becomes_the_current_one():
+    """The decision is made before Karton sets ``current_task``.
+
+    Karton's own ``internal_process`` sets it, and the worker decides
+    whether to run at all before that happens - so a check that reads
+    ``current_task`` sees nothing and lets every worker through.
+    """
+    task = _Task(enabled_workers=["B-Hunters-Nmap"])
+    worker = _Worker("B-Hunters-SQLMap")
+    worker.current_task = None
+
+    assert worker.is_enabled_for_scan(task) is False
+    assert worker.is_enabled_for_scan() is True  # nothing known yet

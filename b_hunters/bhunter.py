@@ -174,9 +174,15 @@ class BHunters(Karton):
         """
         return self._task_list("enabled_workers")
 
-    def _task_list(self, name):
-        """A list the task carries, persistently."""
-        task = getattr(self, "current_task", None)
+    def _task_list(self, name, task=None):
+        """A list the task carries, persistently.
+
+        The task is taken as an argument because ``current_task`` is only
+        set once Karton's own ``internal_process`` runs - and the check
+        that decides whether to run at all happens before that.
+        """
+        if task is None:
+            task = getattr(self, "current_task", None)
         if task is None:
             return ()
         raw = (task.payload_persistent or {}).get(name) or ()
@@ -186,7 +192,7 @@ class BHunters(Karton):
 
     def is_enabled_for_scan(self, task=None):
         """Whether this worker is one the scan asked for."""
-        enabled = self._task_list("enabled_workers")
+        enabled = self._task_list("enabled_workers", task)
         if not enabled:
             return True
         return self.identity in enabled
