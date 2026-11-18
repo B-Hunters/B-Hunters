@@ -86,6 +86,31 @@ walks the source for a version literal so that a second copy cannot be
 added quietly. `1.4.1` is `1.4.0` with that fix; the scanning and the
 reporting are the same.
 
+## The fleet
+
+**A scan runs the workers it asked for.** The Karton router hands a
+task to every consumer whose filters match it, so a task for
+`subdomain`/`new` reached thirteen workers whatever the scan asked
+for. The native adapters had always respected the profile's scanner
+list; the workers did not — so a recon scan ran sqlmap, xray and ffuf
+against the target as well, at the same time.
+
+The list of the workers a scan wants now travels with the task, and a
+worker that is not on it ends the task without touching the target —
+the same way Karton ends a task whose binds are no longer valid.
+
+**The database does not grow for ever.** The job that deletes the
+expired events, artefacts and sessions was written and never called:
+every scan left all three behind, and only an operator with a shell
+could remove them. The runner runs it now, once an hour.
+
+**The report keeps the metadata, not the bodies.** The screenshot
+worker wrote the body of every page, the cookie jar and the network
+log into the report. The body is large, it is the page the target
+serves to an anonymous visitor, and the cookies in it are the target's
+own session — which does not belong in a database that every later
+scan reads back.
+
 ## The scope
 
 **A scan can name the hosts it must not touch.** A bug bounty programme
