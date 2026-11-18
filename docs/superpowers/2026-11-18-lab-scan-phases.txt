@@ -1,0 +1,190 @@
+scan 27bc6571-f09a-4c15-bd80-61a409f43f7c: lab full fleet 1794979934
+  phase   : completed
+  status  : completed
+  scope   : {"authorized_hosts": ["172.25.0.13"], "denied_hosts": ["172.25.0.99", "172.25.0.98", "172.25.0.97", "172.25.0.96", "172.25.0.95"], "excluded_paths": [], "allow_private_network": true, "allow_state_changing": false, "max_requests_per_second": 5.0, "max_concurrency": 3, "request_timeout": 20.0, "max_duration_seconds": 900}
+  error   : -
+
+=== the events, in order ===
+   {"events": [{"seq": 1, "event_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c:scan.created:e0238e11-c7e1-44fe-8190-c913fd173271", "kind": "scan.created", "at": 1794979934.8407316, "actor": "admin", "payload": {"name": "lab full fleet 1794979934", "profile": "standard", "hosts": ["172.25.0.13"]}}, {"seq": 2, "event_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c:scan.queued:0c5959df-a9be-47e8-a578-e6d9d87e8b
+
+=== PHASE 1 - the workers ===
+  scan_id: "27bc6571-f09a-4c15-bd80-61a409f43f7c"
+  workers: 18 item(s)
+      {"worker": "B-Hunters-DalFox", "participated": false, "reason": "never dispatched", "tasks": 0, "items": 0, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}
+      {"worker": "B-Hunters-Ffuf", "participated": false, "reason": "never dispatched", "tasks": 0, "items": 0, "findings": 0, "crashed_tasks": 0, "expected_version": "", "connected_at_scan_start": true}
+      {"worker": "B-Hunters-GoWitness", "participated": true, "reason": "ran, found nothing", "tasks": 1, "items": 9, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}
+      {"worker": "B-Hunters-Katana", "participated": true, "reason": "ran, found nothing", "tasks": 1, "items": 82, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}
+      {"worker": "B-Hunters-Nmap", "participated": true, "reason": "ran, found nothing", "tasks": 1, "items": 1, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}
+      {"worker": "B-Hunters-Nuclei", "participated": true, "reason": "ran", "tasks": 2, "items": 1, "findings": 1, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}
+      {"worker": "B-Hunters-ParamSpider", "participated": true, "reason": "ran, found nothing", "tasks": 1, "items": 0, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}
+      {"worker": "B-Hunters-SQLMap", "participated": false, "reason": "never dispatched", "tasks": 0, "items": 0, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}
+      ... and 10 more
+  native_adapters: 9 item(s)
+      {"name": "service_fingerprint", "version": "1.0.0", "status": "succeeded", "participated": true, "items": 1, "findings": 0}
+      {"name": "security_headers", "version": "1.0.0", "status": "succeeded", "participated": true, "items": 1, "findings": 4}
+      {"name": "tls_configuration", "version": "1.0.0", "status": "succeeded", "participated": true, "items": 0, "findings": 0}
+      {"name": "secret_scan", "version": "1.0.0", "status": "succeeded", "participated": true, "items": 0, "findings": 0}
+      {"name": "openapi_discovery", "version": "1.0.0", "status": "succeeded", "participated": true, "items": 1, "findings": 0}
+      {"name": "graphql_analysis", "version": "1.0.0", "status": "succeeded", "participated": true, "items": 1, "findings": 0}
+      {"name": "dependency_analysis", "version": "1.0.0", "status": "not selected", "participated": false, "items": 0, "findings": 0}
+      {"name": "browser_crawl", "version": "1.0.0", "status": "failed", "participated": true, "items": 500, "findings": 0}
+      ... and 1 more
+  coverage: {"workers": {"total": 18, "participated": 10, "did_not": 8, "not_connected": 0}, "native_adapters": {"total": 9, "participated": 8, "did_not": 1, "not_selected": 1}, "line": "18 workers and 9 native adapters: 18 participated, 9 did not, 0 was not connected"}
+  health: {"online_at_scan_start": ["B-Hunters-DalFox", "B-Hunters-Ffuf", "B-Hunters-GoWitness", "B-Hunters-Katana", "B-Hunters-Nmap", "B-Hunters-Nuclei", "B-Hunters-ParamSpider", "B-Hunters-SQLMap", "B-Hunters-SSTI-Checker", "B-Hunters-dirsearch", "B-Hunters-getjs", "B-Hunters-jsscanner", "B-Hunters-subrecon", "B-Hunters-wapiti", "B-Hunters-waybac
+
+=== PHASE 1 - what the workers wrote ===
+  scan_id: "27bc6571-f09a-4c15-bd80-61a409f43f7c"
+  items: 102 item(s)
+      {"scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "worker": "B-Hunters-Nuclei", "kind": "finding", "value": "[prometheus-metrics] [http] [medium] http://172.25.0.13:3000/metrics", "source": "6afd389c39ad7770dc6c47e8", 
+      {"scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "worker": "B-Hunters-Nmap", "kind": "port", "value": "{\"target\": \"172.25.0.13:3000\", \"ports\": [\"Port: 3000 ,State: open ,Product:   ,Script: {'fingerprint-string
+      {"scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "worker": "B-Hunters-web-technology", "kind": "technology", "value": "{\"http://172.25.0.13:3000\": [[\"Font scripts\", \"Google Font API\", \"\"]]}", "source": "6afd38
+      {"scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "worker": "B-Hunters-GoWitness", "kind": "screenshot", "value": "b'\\xff\\xd8\\xff\\xe0\\x00\\x10JFIF\\x00\\x01\\x01\\x00\\x00\\x01\\x00\\x01\\x00\\x00\\xff\\xe2\\x01\\
+      {"scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "worker": "B-Hunters-GoWitness", "kind": "screenshot", "value": "url: http://172.25.0.13:3000", "source": "6afd389c39ad7770dc6c47e8", "created_at": 1794980107.2928813}
+      {"scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "worker": "B-Hunters-GoWitness", "kind": "screenshot", "value": "final_url: http://172.25.0.13:3000/", "source": "6afd389c39ad7770dc6c47e8", "created_at": 1794980107.29
+      {"scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "worker": "B-Hunters-GoWitness", "kind": "screenshot", "value": "title: OWASP Juice Shop", "source": "6afd389c39ad7770dc6c47e8", "created_at": 1794980107.2928832}
+      {"scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "worker": "B-Hunters-GoWitness", "kind": "screenshot", "value": "response_code: 200", "source": "6afd389c39ad7770dc6c47e8", "created_at": 1794980107.292884}
+      ... and 94 more
+  count: 102
+  counts: {"B-Hunters-Nuclei": 1, "B-Hunters-Nmap": 1, "B-Hunters-web-technology": 1, "B-Hunters-GoWitness": 9, "B-Hunters-Katana": 82, "B-Hunters-jsscanner": 8}
+
+=== PHASE 1 - the services ===
+  scan_id: "27bc6571-f09a-4c15-bd80-61a409f43f7c"
+  urls: 1 item(s)
+      {"scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/", "cookies": [], "detector": "nmap:service", "favicon_hash": 0, "headers": {}, "host": "172.25.0.13:3000", "server": "", "services": [{
+  summary: {"services": [{"name": "Unknown service", "version": "", "category": "Network services", "count": 1, "urls": ["http://172.25.0.13:3000/"]}]}
+
+=== PHASE 1 - the assets ===
+  scan_id: "27bc6571-f09a-4c15-bd80-61a409f43f7c"
+  items: 98 item(s)
+      {"asset_id": "95a9af004b264527a8c77b68ec897947", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/", "host": "172.25.0.13", "path": "/", "kind": "page", "scope": "first_party", "status_c
+      {"asset_id": "c34982a8c9424a2f88d6f3efec1e829c", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/%7B%7Bhref%7D%7D", "host": "172.25.0.13", "path": "/%7B%7Bhref%7D%7D", "kind": "other", 
+      {"asset_id": "81e48d28b1c84c9c95372347cd916a9a", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/api/Challenges/?name=Score+Board", "host": "172.25.0.13", "path": "/api/Challenges/", "k
+      {"asset_id": "1f2cb60283674c9a98c4047e41ffa80d", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/api/Challenges?key=[REDACTED]", "host": "172.25.0.13", "path": "/api/Challenges", "kind"
+      {"asset_id": "f28a00f6ba194dde80ed09e0cab08075", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/api/Feedbacks", "host": "172.25.0.13", "path": "/api/Feedbacks", "kind": "api", "scope":
+      {"asset_id": "c4499afd43174ae6a0c9f5141d9b4c70", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/api/Quantitys/", "host": "172.25.0.13", "path": "/api/Quantitys/", "kind": "api", "scope
+      {"asset_id": "6bc018b8a38f470d93760fba07cc9f5d", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/assets/i18n/%7B%7BblueSky%7D%7D", "host": "172.25.0.13", "path": "/assets/i18n/%7B%7Bblu
+      {"asset_id": "08d100f9828b4f5eb3377bc086ff360e", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/assets/i18n/%7B%7Bquestionnaire%7D%7D", "host": "172.25.0.13", "path": "/assets/i18n/%7B
+      ... and 90 more
+  count: 98
+  counts: {"page": 3, "js": 8, "image": 1, "css": 1, "api": 18, "other": 67}
+
+=== PHASE 1 - the native adapters ===
+  scan_id: "27bc6571-f09a-4c15-bd80-61a409f43f7c"
+  report_id: "6afd389c39ad7770dc6c47e8"
+  workers: 18 item(s)
+      {"worker": "B-Hunters-DalFox", "tasks": 0, "live_tasks": 203, "items": 0, "candidates": 37, "output": [], "status": "running"}
+      {"worker": "B-Hunters-Ffuf", "tasks": 0, "live_tasks": 4, "items": 0, "candidates": 37, "output": [], "status": "running"}
+      {"worker": "B-Hunters-GoWitness", "tasks": 1, "live_tasks": 138, "items": 2, "candidates": 37, "output": [{"field": "Screenshot", "count": 1, "preview": "b'\\xff\\xd8\\xff\\xe0\\x00\\x10JFIF\\x00\\x01\\x01\\x00\\x00\\x01
+      {"worker": "B-Hunters-Katana", "tasks": 1, "live_tasks": 149, "items": 82, "candidates": 37, "output": [{"field": "links", "count": 82, "preview": "    http://172.25.0.13:3000/socket.io/?EIO=4&transport=polling&t=oqv3riy
+      {"worker": "B-Hunters-Nmap", "tasks": 1, "live_tasks": 217, "items": 1, "candidates": 37, "output": [{"field": "Ports", "count": 1, "preview": "    [{'target': '172.25.0.13:3000', 'ports': ['Port: 3000 ,State: open ,Prod
+      {"worker": "B-Hunters-Nuclei", "tasks": 2, "live_tasks": 321, "items": 1, "candidates": 37, "output": [{"field": "Vulns.Nuclei", "count": 1, "preview": "    [prometheus-metrics] [http] [medium] http://172.25.0.13:3000/me
+      {"worker": "B-Hunters-ParamSpider", "tasks": 1, "live_tasks": 129, "items": 0, "candidates": 37, "output": [], "status": "ran, found nothing"}
+      {"worker": "B-Hunters-SQLMap", "tasks": 0, "live_tasks": 409, "items": 0, "candidates": 37, "output": [], "status": "running"}
+      ... and 10 more
+  summary: {"crawled_urls": 82, "urls_with_parameters": 37}
+  participation: {"B-Hunters-subrecon": 1, "B-Hunters-Nmap": 1, "B-Hunters-web-technology": 1, "B-Hunters-Katana": 1, "B-Hunters-Nuclei": 2, "B-Hunters-getjs": 1, "B-Hunters-jsscanner": 8, "B-Hunters-ParamSpider": 1, "B-Hunters-GoWitness": 1, "B-Hunters-dirsearch": 1}
+
+=== PHASE 2 - the agents ===
+  agents: 15 item(s)
+      {"instance_id": "access_control", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "role": "access_control", "conclusion": "Access control analyst", "detail": {}, "error": "", "last_seen_at": 1794980401.7533748, "statu
+      {"instance_id": "adjudicator", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "role": "adjudicator", "conclusion": "The scan of http://172.25.0.13:3000/ (an OWASP Juice Shop instance: Express/Node backend + Angular S
+      {"role": "api", "instance_id": "api", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "conclusion": "The target is an OWASP Juice Shop instance (Express/Node + Angular SPA) served on 172.25.0.13:3000. Correlating the 
+      {"instance_id": "authn", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "role": "authn", "conclusion": "Authentication workflow analyst", "detail": {}, "error": "", "last_seen_at": 1794980401.7133687, "status": "runn
+      {"role": "javascript", "instance_id": "javascript", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "conclusion": "Static analysis of the in-scope JavaScript at http://172.25.0.13:3000/ (OWASP Juice Shop, Angular SPA 
+      {"role": "recon", "instance_id": "recon", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "conclusion": "Key finding: `/rest/products` returns a 500 with an Express stack trace (source paths under `/juice-shop/build/`
+      {"role": "scanner:asset_crawl", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "instance_id": "scanner:asset_crawl", "conclusion": "29 item(s), no errors", "detail": {}, "error": "", "last_seen_at": 1794979996.069435
+      {"role": "scanner:browser_crawl", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "instance_id": "scanner:browser_crawl", "conclusion": "500 item(s), with errors", "detail": {}, "error": "", "last_seen_at": 1794979994
+      ... and 7 more
+
+=== PHASE 2 - the agent report ===
+  scan_id: "27bc6571-f09a-4c15-bd80-61a409f43f7c"
+  roles: 11 item(s)
+      {"role": "recon", "tasks": 1, "status": "succeeded", "stop_reason": "completed", "rounds": 5, "tool_calls": 18, "tokens": 110185, "findings_raised": 0, "findings_confirmed": 0, "conclusion": "Key finding: `/rest/products
+      {"role": "javascript", "tasks": 1, "status": "succeeded", "stop_reason": "completed", "rounds": 7, "tool_calls": 12, "tokens": 161971, "findings_raised": 0, "findings_confirmed": 0, "conclusion": "Static analysis of the 
+      {"role": "api", "tasks": 1, "status": "succeeded", "stop_reason": "completed", "rounds": 7, "tool_calls": 17, "tokens": 179119, "findings_raised": 0, "findings_confirmed": 0, "conclusion": "The target is an OWASP Juice S
+      {"role": "authn", "tasks": 1, "status": "wall_clock", "stop_reason": "wall_clock", "rounds": 0, "tool_calls": 0, "tokens": 0, "findings_raised": 0, "findings_confirmed": 0, "conclusion": ""}
+      {"role": "access_control", "tasks": 1, "status": "wall_clock", "stop_reason": "wall_clock", "rounds": 0, "tool_calls": 0, "tokens": 0, "findings_raised": 0, "findings_confirmed": 0, "conclusion": ""}
+      {"role": "vuln_injection", "tasks": 1, "status": "wall_clock", "stop_reason": "wall_clock", "rounds": 0, "tool_calls": 0, "tokens": 0, "findings_raised": 0, "findings_confirmed": 0, "conclusion": ""}
+      {"role": "vuln_xss", "tasks": 1, "status": "wall_clock", "stop_reason": "wall_clock", "rounds": 0, "tool_calls": 0, "tokens": 0, "findings_raised": 0, "findings_confirmed": 0, "conclusion": ""}
+      {"role": "vuln_ssrf", "tasks": 1, "status": "wall_clock", "stop_reason": "wall_clock", "rounds": 0, "tool_calls": 0, "tokens": 0, "findings_raised": 0, "findings_confirmed": 0, "conclusion": ""}
+      ... and 3 more
+  stop_reasons: {"completed": 4, "wall_clock": 7}
+  built_in_roles: 13
+  planned_roles: 11
+
+=== PHASE 3 - the findings ===
+  items: 100 item(s)
+      {"finding_id": "06966835-d97d-4909-b473-f4121364437e", "scan_id": "b23b694e-7d66-4a50-b402-761dab2038b3", "fingerprint": "4353b543854f41754086992da9c5dc6c", "title": "Application served over cleartext HTTP only \u2014 no
+      {"finding_id": "dd285c38-603f-481a-b958-c086d0bdd3c0", "scan_id": "1aa51b08-5610-4824-a2dd-618d75d24197", "fingerprint": "5be712ddf0f9d541f7be91afb69183d5", "title": "GraphQL argument 'filter' of 'pastes' is vulnerable t
+      {"finding_id": "f82449fc-51a6-4b55-ab24-85d28b1ad36a", "scan_id": "897eda44-111b-4ee1-ac14-26c053779a25", "fingerprint": "5be712ddf0f9d541f7be91afb69183d5", "title": "GraphQL argument 'filter' of 'pastes' is vulnerable t
+      {"finding_id": "706c3ef8-8c94-4ad3-96ee-4ea77e83e411", "scan_id": "b23b694e-7d66-4a50-b402-761dab2038b3", "fingerprint": "688f6f7abf20eaa534190a7822c4431c", "title": "Path:/WebGoat/ , info : Redirected to HTTP location :
+      {"finding_id": "a84c0c49-faa5-4ba4-bdd3-38992f9d6fd2", "scan_id": "0b088239-48ce-4f43-a960-adf5c345c7b2", "fingerprint": "77ec8476e01fc0f9a741e9beb5484b2e", "title": "Unauthorised password reset for arbitrary users via P
+      {"finding_id": "e8061651-e96e-4a8c-a250-e42d2ee5f05d", "scan_id": "b23b694e-7d66-4a50-b402-761dab2038b3", "fingerprint": "39ee98f89bb0983ab5e7c2058a9b0fc1", "title": "Unauthenticated access to Spring Boot Actuator manage
+      {"finding_id": "a01904ac-0c9a-4402-b236-dcaf36e5a411", "scan_id": "b23b694e-7d66-4a50-b402-761dab2038b3", "fingerprint": "813049d9a1ad19367c0f45a38e576ba9", "title": "All standard security response headers are absent (CS
+      {"finding_id": "0a697ec7-6d89-4d37-89d7-87bfe8834892", "scan_id": "b23b694e-7d66-4a50-b402-761dab2038b3", "fingerprint": "24b8ee284494a78b86d8457acb177d50", "title": "Spring Boot Actuator management endpoints reachable w
+      {"finding_id": "7c04966d-dd5a-4606-ac05-bc37ada35d37", "scan_id": "c8c43035-cf77-4800-b736-0613f970e8f9", "fingerprint": "90c1128f1f6d568d257f6a3c1e24f890", "title": "WebWolf /files endpoint is served to unauthenticated 
+      {"finding_id": "682c1205-397a-41bf-af8d-555994fd6178", "scan_id": "b23b694e-7d66-4a50-b402-761dab2038b3", "fingerprint": "f78e92667cc23a058d5ef405d9b65deb", "title": "Session identifiers disclosed in redirect URLs (Tomca
+      {"finding_id": "2e131f4b-92b2-4fa7-a9c3-2efaa29a1785", "scan_id": "c8c43035-cf77-4800-b736-0613f970e8f9", "fingerprint": "811981331fc404aba74c91d76da21bf6", "title": "WebWolf /files endpoint served unauthenticated while 
+      {"finding_id": "5d12f78b-b10d-4c31-aa42-2f796a663e94", "scan_id": "6a583a3a-bd96-4623-bd17-4383cbbbf49b", "fingerprint": "6282e7086e0604019219c45dc877fa28", "title": "Unauthenticated Spring Boot Actuator endpoints expose
+      ... and 88 more
+  count: 100
+  total: 350
+  severity_counts: {"critical": 0, "high": 5, "medium": 103, "low": 101, "info": 141}
+  class_counts: {"security_misconfiguration": 101, "SQL Injection": 1, "CWE-200 / CWE-306 (Missing Authentication for Critical Function)": 1, "configuration_intelligence": 1, "broken_object_level_authorization / privilege_escalation": 1, "CWE-598 / CWE-200": 1, "scope_note": 1, "CWE-79 context - safe encoding confirmed": 1, "cross_site_request_forgery": 
+
+=== PHASE 4 - the report ===
+  scan: {"scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "name": "lab full fleet 1794979934", "status": "completed", "created_by": "admin", "created_at": 1794979934.8397622, "updated_at": 1794980753.805508, "definition": {"description": "Rapyd public bug bounty scope (Bugcrowd): *.rapyd.net in scope.", "targets": ["http://172.25.0.13:3000/"], 
+  generated_at: 1794980768.0612981
+  finding_count: 6
+  findings: 6 item(s)
+      {"finding_id": "2b71661b-9c20-4d03-a7af-ebae30c85420", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "fingerprint": "7b92403803ca5810ad4e624a9ae495b7", "title": "[prometheus-metrics] [http] [medium] http://172.25.0.
+      {"finding_id": "5adeb37b-57ff-4a25-85da-1fdfd2549df4", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "fingerprint": "1bd31791c490adf6ff8d204bc84c5aa3", "title": "Missing content-security-policy header", "summary": "
+      {"finding_id": "f4a44404-52cb-4efc-8570-4200745dad91", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "fingerprint": "238bb6a3b7d10cb772d9c533669a14df", "title": "Technologies identified", "summary": "['Font scripts'
+      {"finding_id": "87f8ccae-6110-4bd5-9b3f-0cf5fabf5b46", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "fingerprint": "21cdd7bb71d77bb214b8a075fc18cf4b", "title": "Missing strict-transport-security header", "summary":
+      {"finding_id": "e7f7c01c-6b58-4237-8714-2646734a12c4", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "fingerprint": "3cf0a4f0216ef939d9295446dd68fb03", "title": "Missing permissions-policy header", "summary": "Permi
+      {"finding_id": "7e4f84fa-939f-4751-b996-cc8ff101e096", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "fingerprint": "a21b69ed873f3159e4ce8ee82948fa52", "title": "Missing referrer-policy header", "summary": "Referrer
+  assets: 98 item(s)
+      {"asset_id": "95a9af004b264527a8c77b68ec897947", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/", "host": "172.25.0.13", "path": "/", "kind": "page", "scope": "first_party", "status_c
+      {"asset_id": "c34982a8c9424a2f88d6f3efec1e829c", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/%7B%7Bhref%7D%7D", "host": "172.25.0.13", "path": "/%7B%7Bhref%7D%7D", "kind": "other", 
+      {"asset_id": "81e48d28b1c84c9c95372347cd916a9a", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/api/Challenges/?name=Score+Board", "host": "172.25.0.13", "path": "/api/Challenges/", "k
+      {"asset_id": "1f2cb60283674c9a98c4047e41ffa80d", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/api/Challenges?key=[REDACTED]", "host": "172.25.0.13", "path": "/api/Challenges", "kind"
+      {"asset_id": "f28a00f6ba194dde80ed09e0cab08075", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/api/Feedbacks", "host": "172.25.0.13", "path": "/api/Feedbacks", "kind": "api", "scope":
+      {"asset_id": "c4499afd43174ae6a0c9f5141d9b4c70", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/api/Quantitys/", "host": "172.25.0.13", "path": "/api/Quantitys/", "kind": "api", "scope
+      {"asset_id": "6bc018b8a38f470d93760fba07cc9f5d", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/assets/i18n/%7B%7BblueSky%7D%7D", "host": "172.25.0.13", "path": "/assets/i18n/%7B%7Bblu
+      {"asset_id": "08d100f9828b4f5eb3377bc086ff360e", "scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "url": "http://172.25.0.13:3000/assets/i18n/%7B%7Bquestionnaire%7D%7D", "host": "172.25.0.13", "path": "/assets/i18n/%7B
+      ... and 90 more
+  asset_counts: {"page": 3, "js": 8, "image": 1, "css": 1, "api": 18, "other": 67}
+  participation: {"scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "workers": [{"worker": "B-Hunters-DalFox", "participated": false, "reason": "never dispatched", "tasks": 0, "items": 0, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}, {"worker": "B-Hunters-Ffuf", "participated": false, "reason": "never 
+  agents: {"scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "roles": [{"role": "recon", "tasks": 1, "status": "succeeded", "stop_reason": "completed", "rounds": 5, "tool_calls": 18, "tokens": 110185, "findings_raised": 0, "findings_confirmed": 0, "conclusion": "Key finding: `/rest/products` returns a 500 with an Express stack trace (source paths 
+  integrity: {"scan_id": "27bc6571-f09a-4c15-bd80-61a409f43f7c", "verdict": "pass", "unexplained": 0, "crash": 0, "by_class": {"http_status": 1, "connection": 0, "timeout": 11, "dns": 0, "scope": 0, "permission": 1, "unknown_tool": 0, "budget": 19, "arguments": 0, "crash": 0, "unexplained": 0}, "total": 32, "entries": [{"source": "tool_call", "detail"
+  transcript: 11 item(s)
+      {"role": "recon", "text": "[recon] tool list_assets (ok):\n{\"kind\": \"all\", \"count\": 98, \"by_kind\": {\"page\": 3, \"js\": 8, \"image\": 1, \"css\": 1, \"api\": 18, \"other\": 67}, \"assets\": [{\"asset_id\": \"95a
+      {"role": "javascript", "text": "[javascript] tool list_assets (ok):\n{\"kind\": \"all\", \"count\": 98, \"by_kind\": {\"page\": 3, \"js\": 8, \"image\": 1, \"css\": 1, \"api\": 18, \"other\": 67}, \"assets\": [{\"asset_i
+      {"role": "api", "text": "[api] tool list_assets (ok):\n{\"kind\": \"all\", \"count\": 98, \"by_kind\": {\"page\": 3, \"js\": 8, \"image\": 1, \"css\": 1, \"api\": 18, \"other\": 67}, \"assets\": [{\"asset_id\": \"95a9af0
+      {"role": "authn", "text": "[authn] tool http_request (ok):\n{\"status_code\": 200, \"reason\": \"OK\", \"url\": \"http://172.25.0.13:3000/\", \"final_url\": \"http://172.25.0.13:3000/\", \"redirect_chain\": [\"http://172
+      {"role": "access_control", "text": "[access_control] tool list_assets (ok):\n{\"kind\": \"all\", \"count\": 98, \"by_kind\": {\"page\": 3, \"js\": 8, \"image\": 1, \"css\": 1, \"api\": 18, \"other\": 67}, \"assets\": [{\
+      {"role": "vuln_injection", "text": "[vuln_injection] tool http_request (ok):\n{\"status_code\": 200, \"reason\": \"OK\", \"url\": \"http://172.25.0.13:3000/\", \"final_url\": \"http://172.25.0.13:3000/\", \"redirect_chai
+      {"role": "vuln_xss", "text": "", "omitted_bytes": 0}
+      {"role": "vuln_ssrf", "text": "", "omitted_bytes": 0}
+      ... and 3 more
+  transcript_omitted_bytes: 563327
+
+=== the integrity ===
+  scan_id: "27bc6571-f09a-4c15-bd80-61a409f43f7c"
+  verdict: "pass"
+  unexplained: 0
+  crash: 0
+  by_class: {"http_status": 1, "connection": 0, "timeout": 11, "dns": 0, "scope": 0, "permission": 1, "unknown_tool": 0, "budget": 19, "arguments": 0, "crash": 0, "unexplained": 0}
+  total: 32
+  entries: 32 item(s)
+      {"source": "tool_call", "detail": "scan concurrency or duration budget exhausted", "status": "", "class": "budget"}
+      {"source": "tool_call", "detail": "scan concurrency or duration budget exhausted", "status": "", "class": "budget"}
+      {"source": "tool_call", "detail": "scan concurrency or duration budget exhausted", "status": "", "class": "budget"}
+      {"source": "tool_call", "detail": "scan concurrency or duration budget exhausted", "status": "", "class": "budget"}
+      {"source": "tool_call", "detail": "scan concurrency or duration budget exhausted", "status": "", "class": "budget"}
+      {"source": "tool_call", "detail": "scan concurrency or duration budget exhausted", "status": "", "class": "budget"}
+      {"source": "tool_call", "detail": "scan concurrency or duration budget exhausted", "status": "", "class": "budget"}
+      {"source": "tool_call", "detail": "scan concurrency or duration budget exhausted", "status": "", "class": "budget"}
+      ... and 24 more
+  entries_count: 32
+  stored: {"unexplained": 0, "crash": 0, "failing": 0, "by_class": {"http_status": 1, "connection": 0, "timeout": 11, "dns": 0, "scope": 0, "permission": 1, "unknown_tool": 0, "budget": 19, "arguments": 0, "crash": 0, "unexplained": 0}, "total": 32, "verdict": "pass"}
