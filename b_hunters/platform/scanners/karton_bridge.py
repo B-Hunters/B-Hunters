@@ -158,6 +158,10 @@ class WorkerTarget:
     #: exclusions have to travel with the task - otherwise a worker
     #: scans an out-of-scope asset the scan was told to leave alone.
     denied_hosts: tuple[str, ...] = ()
+    #: The workers this scan asked for.  The router sends a task to
+    #: every consumer whose filters match, so without this a scan that
+    #: named three scanners would run all seventeen.
+    enabled_workers: tuple[str, ...] = ()
 
 
 @dataclass
@@ -206,6 +210,7 @@ class KartonWorkerBridge:
         description: str = "",
         platform_scan_id: str = "",
         denied_hosts: Sequence[str] = (),
+        enabled_workers: Sequence[str] = (),
     ) -> WorkerTarget:
         """Create the legacy scan document for a target.
 
@@ -239,6 +244,7 @@ class KartonWorkerBridge:
             legacy_scan_id=str(scan_oid),
             platform_scan_id=platform_scan_id,
             denied_hosts=tuple(str(h).strip().lower() for h in denied_hosts if str(h).strip()),
+            enabled_workers=tuple(str(w).strip() for w in enabled_workers if str(w).strip()),
         )
 
     def online_identities(self) -> list[str]:
@@ -363,6 +369,14 @@ class KartonWorkerBridge:
             # every subdomain it finds to the rest of the fleet, and a
             # worker must refuse the ones that are out of scope.
             task.add_payload("denied_hosts", list(target.denied_hosts), persistent=True)
+        if target.enabled_workers:
+            # The workers this scan asked for.  Persistent, so that the
+            # whole subtree inherits them: the router sends a task to
+            # every consumer whose filters match, and a worker that the
+            # scan did not ask for must do nothing at all.
+            task.add_payload(
+                "enabled_workers", list(target.enabled_workers), persistent=True
+            )
         if target.auth:
             # The session of the identity the scan names.  The workers
             # read it from the task and pass it to their tools; it is

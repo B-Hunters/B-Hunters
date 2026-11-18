@@ -157,13 +157,60 @@ class BHunters(Karton):
         finds to the rest of the fleet: without this, a worker would
         scan a host the scan was told to leave alone.
         """
+        return self._task_list("denied_hosts")
+
+    def enabled_workers(self):
+        """The workers this scan asked for.
+
+        The Karton router hands a task to every consumer whose filters
+        match it, so a task for ``subdomain``/``new`` reaches thirteen
+        workers whatever the scan asked for.  The list of the workers
+        the scan wants travels with the task, and a worker that is not
+        on it does nothing at all.
+
+        An empty list means the scan said nothing, and every worker
+        runs - which is what a scan that was not started by the
+        platform does.
+        """
+        return self._task_list("enabled_workers")
+
+    def _task_list(self, name):
+        """A list the task carries, persistently."""
         task = getattr(self, "current_task", None)
         if task is None:
             return ()
-        raw = (task.payload_persistent or {}).get("denied_hosts") or ()
+        raw = (task.payload_persistent or {}).get(name) or ()
         if isinstance(raw, str):
             raw = [raw]
-        return tuple(str(host).strip().lower() for host in raw if str(host).strip())
+        return tuple(str(item).strip() for item in raw if str(item).strip())
+
+    def is_enabled_for_scan(self, task=None):
+        """Whether this worker is one the scan asked for."""
+        enabled = self._task_list("enabled_workers")
+        if not enabled:
+            return True
+        return self.identity in enabled
+
+    def internal_process(self, task):
+        """Skip the task when the scan did not ask for this worker.
+
+        The router cannot be told which consumer a task is for: it sends
+        a task to every consumer whose filters match.  So the worker
+        decides, and a worker that the scan did not ask for ends the
+        task without touching the target - the same way Karton ends a
+        task whose binds are no longer valid.
+        """
+        if not self.is_enabled_for_scan(task):
+            self.current_task = task
+            self.log.info("skipped: this scan did not ask for %s", self.identity)
+            try:
+                from karton.core.task import TaskState
+
+                self.backend.set_task_status(task, TaskState.FINISHED)
+            except Exception:  # pragma: no cover - the backend may be down
+                self.log.exception("could not finish the skipped task")
+            return
+        return super().internal_process(task)
 
     def is_denied_host(self, host):
         """Whether a host is one of the scan's exclusions."""

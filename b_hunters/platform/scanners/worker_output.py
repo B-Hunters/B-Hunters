@@ -55,6 +55,39 @@ DATA_WORKERS: dict[str, str] = {
     "gowitness": "B-Hunters-GoWitness",
 }
 
+#: The worker identity each scanner name belongs to.
+#:
+#: The Karton router hands a task to *every* consumer whose filters
+#: match it, so a task for ``subdomain``/``new`` reaches thirteen
+#: workers whatever the scan asked for.  The native adapters respect
+#: the profile's scanner list; this map is how the platform tells the
+#: workers which ones it wants, so the two halves of a scan agree.
+WORKER_BY_SCANNER: dict[str, str] = {
+    "subrecon": "B-Hunters-subrecon",
+    "nmap": "B-Hunters-Nmap",
+    "gowitness": "B-Hunters-GoWitness",
+    "dirsearch": "B-Hunters-dirsearch",
+    "paramspider": "B-Hunters-ParamSpider",
+    "webtechnology": "B-Hunters-web-technology",
+    "katana": "B-Hunters-Katana",
+    "getjs": "B-Hunters-getjs",
+    "jsscanner": "B-Hunters-jsscanner",
+    "nuclei": "B-Hunters-Nuclei",
+    "dalfox": "B-Hunters-DalFox",
+    "sqlmap": "B-Hunters-SQLMap",
+    "ssti": "B-Hunters-SSTI-Checker",
+    "wapiti": "B-Hunters-wapiti",
+    "xray": "B-Hunters-xray",
+    "ffuf": "B-Hunters-Ffuf",
+    "wayback": "B-Hunters-wayback",
+}
+
+#: The scanner name each worker identity belongs to.
+SCANNER_BY_WORKER: dict[str, str] = {
+    identity: scanner for scanner, identity in WORKER_BY_SCANNER.items()
+}
+
+
 #: Every worker of the platform, in the order the console shows them.
 WORKER_IDENTITIES: tuple[str, ...] = (
     "B-Hunters-DalFox",

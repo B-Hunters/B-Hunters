@@ -1188,6 +1188,7 @@ class ScanOrchestrator:
                 description=context.name,
                 platform_scan_id=context.scan_id,
                 denied_hosts=context.denied_hosts,
+                enabled_workers=self._enabled_workers(context),
             )
             # The session of the identity the scan names travels with
             # the task, so that the workers scan the authenticated
@@ -1470,6 +1471,27 @@ class ScanOrchestrator:
                 "could not read the candidate URLs of the scan %s", context.scan_id
             )
             return 0
+
+    @staticmethod
+    def _enabled_workers(context: ScanContext) -> tuple[str, ...]:
+        """The workers this scan asked for.
+
+        The router hands a task to every consumer whose filters match,
+        so a task for ``subdomain``/``new`` reaches thirteen workers
+        whatever the scan asked for.  The native adapters respect the
+        profile's scanner list; this is how the workers do the same.
+
+        A scanner name that names no worker - one of the native
+        adapters - is not a worker, and is ignored.
+        """
+        from ..scanners.worker_output import WORKER_BY_SCANNER
+
+        enabled: list[str] = []
+        for name in context.profile.scanners:
+            identity = WORKER_BY_SCANNER.get(str(name).strip().lower())
+            if identity and identity not in enabled:
+                enabled.append(identity)
+        return tuple(enabled)
 
     def _expected_worker_versions(self) -> dict[str, str]:
         """The version the platform expects of every worker.
