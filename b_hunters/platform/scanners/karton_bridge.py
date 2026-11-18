@@ -273,20 +273,25 @@ class KartonWorkerBridge:
             log.debug("could not read the online consumers: %s", exc)
             return []
 
-        for queue in self._bound_queues():
+        for queue in self._queues():
             identity = identity_from_queue(queue)
-            if identity:
+            # A bound queue is not a running worker.  The router knows
+            # how many consumers are listening to each identity, and a
+            # queue nobody is listening to is a bind left behind by a
+            # worker that has stopped.  Counting those as online is
+            # what made a scan wait for tasks that nobody would take.
+            if identity and queue.online_consumers_count > 0:
                 identities.add(identity)
         return sorted(name for name in identities if name)
 
-    def _bound_queues(self) -> list[str]:
-        """The queues the workers are bound to."""
+    def _queues(self) -> list[Any]:
+        """The queues the workers are bound to, with their consumers."""
         try:
             from karton.core.inspect import KartonState
 
             state = KartonState(self.producer.backend)
-            return list(state.queues.keys())
-        except Exception as exc:  # pragma: no cover - the backend may be down
+            return list(state.queues.values())
+        except Exception as exc:  # pragma: no cover - the backend may blip
             log.debug("could not read the bound queues: %s", exc)
             return []
 
@@ -400,6 +405,8 @@ class KartonWorkerBridge:
         *,
         root_uid: str = "",
         deadline: float | None = None,
+        should_stop=None,
+        online: set[str] | None = None,
     ) -> WorkerResults:
         """Wait for the workers and read back what they wrote.
 
@@ -412,7 +419,12 @@ class KartonWorkerBridge:
             deadline = time.monotonic() + self.wait_seconds
 
         if root_uid:
-            self._await_analysis(root_uid, deadline=deadline)
+            self._await_analysis(
+                root_uid,
+                deadline=deadline,
+                should_stop=should_stop,
+                online=online,
+            )
 
         report_id = self._await_report_id(target, deadline=deadline)
         if not report_id:
@@ -476,7 +488,14 @@ class KartonWorkerBridge:
                 counts[identity] = counts.get(identity, 0) + 1
         return counts
 
-    def _await_analysis(self, root_uid: str, *, deadline: float) -> None:
+    def _await_analysis(
+        self,
+        root_uid: str,
+        *,
+        deadline: float,
+        should_stop=None,
+        online: set[str] | None = None,
+    ) -> None:
         """Wait until every task of the analysis tree is finished.
 
         The tree is the reliable signal.  The ``status`` fields of the
@@ -484,17 +503,39 @@ class KartonWorkerBridge:
         alone, so two scans of the same host overwrite each other's
         status.  The analysis tree is rooted in the task the platform
         published, so it describes this scan and no other.
+
+        Two things end the wait early.  A scan that was asked to stop
+        does not wait.  And a task that is queued to a consumer nobody
+        is listening to will never be taken: the router sends a task to
+        every consumer whose filters match it, so a bind left behind by
+        a worker that has stopped leaves a task in a queue for good.
+        Waiting for it is how the worker phase spent the whole budget of
+        a scan and left the agents with none.
         """
         from karton.core.inspect import KartonState
         from karton.core.task import TaskState
 
         terminal = {TaskState.FINISHED, TaskState.CRASHED}
         while True:
+            if should_stop is not None and should_stop():
+                log.info("the scan was asked to stop; the workers are not waited for")
+                return
             try:
                 state = KartonState(self.producer.backend)
                 analysis = state.get_analysis(root_uid)
-                if all(task.status in terminal for task in analysis.tasks):
+                open_tasks = [task for task in analysis.tasks if task.status not in terminal]
+                if not open_tasks:
                     return
+                if online is not None:
+                    waiting_on_absent = all(
+                        str((task.headers or {}).get("receiver") or "") not in online
+                        for task in open_tasks
+                    )
+                    if waiting_on_absent:
+                        log.info(
+                            "the remaining tasks are queued to workers that are not running"
+                        )
+                        return
             except Exception as exc:  # pragma: no cover - the backend may blip
                 log.debug("could not read the Karton analysis %s: %s", root_uid, exc)
             if time.monotonic() >= deadline:

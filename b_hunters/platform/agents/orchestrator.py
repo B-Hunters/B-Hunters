@@ -1205,10 +1205,24 @@ class ScanOrchestrator:
         if not prepared:
             return []
 
+        # The workers that are running right now.  A task queued to a
+        # consumer nobody is listening to will never be taken, and a scan
+        # that was asked to stop does not wait at all.
+        try:
+            online = set(self.worker_bridge.online_identities())
+        except Exception:  # pragma: no cover - the backend may be down
+            online = set()
+
         def collect_one(item):
             target, root_uid = item
             try:
-                return target, self.worker_bridge.collect(target, root_uid=root_uid, deadline=deadline)
+                return target, self.worker_bridge.collect(
+                    target,
+                    root_uid=root_uid,
+                    deadline=deadline,
+                    should_stop=lambda: self._is_cancelled(context.scan_id),
+                    online=online,
+                )
             except Exception as exc:
                 log.warning("could not collect the results for %s: %s", target.domain, exc)
                 return target, WorkerResults()
