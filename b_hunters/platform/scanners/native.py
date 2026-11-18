@@ -729,8 +729,17 @@ async def asset_crawl_executor(request: ScanRequest) -> ScanResult:
             seen.add(child_url)
             child_item = _asset_item(child_url, depth=depth + 1, discovered_from=url)
             assets[child_url] = child_item
-            if _is_cross_origin(child, raw) or is_external(child_url, authorized):
-                # A third-party reference is recorded, never fetched.
+            if is_external(child_url, authorized):
+                # A reference the scan is not authorised to fetch is
+                # recorded, never fetched.
+                #
+                # The test is the scope, not the origin: a scan that
+                # covers ``*.example.com`` is authorised for every
+                # subdomain of it, including one the page it was found
+                # on does not share an origin with.  Treating a
+                # cross-origin reference as third-party on its own
+                # stopped the crawl at the apex of a domain and left
+                # the whole site unfetched.
                 child_item["scope"] = "external"
                 continue
             if depth + 1 <= MAX_ASSET_DEPTH:

@@ -348,6 +348,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
     depends_on:
@@ -362,6 +367,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
     depends_on:
@@ -376,6 +386,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
     depends_on:
@@ -390,6 +405,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
       # How many requests sqlmap may have in flight.  A scan of a
@@ -408,6 +428,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
       # How many requests dalfox may have in flight.
@@ -424,6 +449,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
     depends_on:
@@ -442,6 +472,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
     depends_on:
@@ -460,6 +495,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
     depends_on:
@@ -474,6 +514,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
     depends_on:
@@ -491,6 +536,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
     depends_on:
@@ -505,6 +555,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
     depends_on:
@@ -519,6 +574,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
     depends_on:
@@ -533,6 +593,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
     depends_on:
@@ -547,6 +612,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
       # How many requests the template scanner may have in flight.
@@ -565,6 +635,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
     depends_on:
@@ -579,6 +654,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
     depends_on:
@@ -596,6 +676,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/b-hunters.ini:/etc/b-hunters/b-hunters.ini:ro
+      # The shared class comes from the platform repository, so a change
+      # to it reaches the workers without rebuilding every image.  The
+      # image is still built from it - this is how the fleet is run
+      # while the class is still moving.
+      - ./b_hunters:/usr/local/lib/python3.12/site-packages/b_hunters:ro
     environment:
       - BHUNTERS_CONFIG=/etc/b-hunters/b-hunters.ini
     depends_on:
