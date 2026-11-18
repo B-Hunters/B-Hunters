@@ -478,6 +478,22 @@ async def _fetch_document(url: str, request: ScanRequest, *, limit: int = MAX_AS
             _release_slot(scope)
 
     read = bytes(body[:limit])
+
+    if status_code == 429 and scope is not None:
+        # The host is asking for less traffic.  The policy has a bucket
+        # for exactly this, and nothing was calling it: a scan that is
+        # told to slow down and does not is how a host ends up blocking
+        # the scanner outright.
+        bucket_for = getattr(scope, "bucket_for", None)
+        penalise = getattr(scope, "penalise", None)
+        try:
+            if callable(penalise):
+                penalise(decision.host)
+            elif callable(bucket_for):
+                bucket_for(decision.host).penalise()
+        except Exception:  # pragma: no cover - the scope may be a double
+            pass
+
     return FetchedDocument(
         allowed=True,
         status_code=status_code,
