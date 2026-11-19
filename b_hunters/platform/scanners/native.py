@@ -27,8 +27,11 @@ import shutil
 import socket
 import ssl
 import subprocess
+import time
 from collections import deque
 from dataclasses import dataclass
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Optional
 from urllib.parse import urljoin, urlsplit
 
@@ -433,6 +436,34 @@ class FetchedDocument:
     size_bytes: int = 0
     #: The body, which the caller must not store.
     text: str = ""
+    #: How long the host asked the scan to wait, in seconds.  It is
+    #: only set when the host answered ``429``.
+    retry_after_seconds: float = 0.0
+
+
+def parse_retry_after(value: str, *, now: Optional[float] = None) -> float:
+    """How long a host asked the scan to wait, in seconds.
+
+    The header is either a number of seconds or the moment the host will
+    take requests again.  A header that says neither is worth nothing:
+    the scan waits the default rather than guessing at a moment, and a
+    guess that is too short is the traffic that extends the block.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    if text.isdigit():
+        return float(text)
+    try:
+        moment = parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        return 0.0
+    if moment is None:
+        return 0.0
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    reference = time.time() if now is None else float(now)
+    return max(0.0, moment.timestamp() - reference)
 
 
 async def _fetch_document(url: str, request: ScanRequest, *, limit: int = MAX_ASSET_BYTES) -> FetchedDocument:
@@ -451,6 +482,16 @@ async def _fetch_document(url: str, request: ScanRequest, *, limit: int = MAX_AS
         decision = scope.evaluate_url(url)
         if not decision.allowed:
             return FetchedDocument(allowed=False, reason=decision.reason)
+        is_paused = getattr(scope, "is_paused", None)
+        if callable(is_paused) and is_paused(decision.host):
+            # The host asked the scan to wait.  Asking again anyway is
+            # how a rate limit becomes a block that lasts for hours.
+            paused_seconds = getattr(scope, "paused_seconds", None)
+            remaining = paused_seconds(decision.host) if callable(paused_seconds) else 0.0
+            return FetchedDocument(
+                allowed=False,
+                reason=f"the host asked the scan to wait ({remaining:.0f}s left)",
+            )
         if not await _reserve_slot(scope, decision.host):
             return FetchedDocument(allowed=False, reason="the scan budget is exhausted")
         reserved = True
@@ -470,6 +511,7 @@ async def _fetch_document(url: str, request: ScanRequest, *, limit: int = MAX_AS
                         break
                 status_code = response.status_code
                 content_type = response.headers.get("content-type", "").strip()
+                retry_after = response.headers.get("retry-after", "")
                 encoding = response.encoding or "utf-8"
     except Exception as exc:
         return FetchedDocument(allowed=True, error=f"{type(exc).__name__}: {exc}")
@@ -479,18 +521,27 @@ async def _fetch_document(url: str, request: ScanRequest, *, limit: int = MAX_AS
 
     read = bytes(body[:limit])
 
-    if status_code == 429 and scope is not None:
-        # The host is asking for less traffic.  The policy has a bucket
-        # for exactly this, and nothing was calling it: a scan that is
-        # told to slow down and does not is how a host ends up blocking
-        # the scanner outright.
+    retry_after_seconds = 0.0
+    if status_code == 429:
+        # The host is asking for less traffic, and it says for how
+        # long.  The policy keeps that answer: the scan stops asking
+        # this host until the moment passes, instead of finding out the
+        # hard way that the answer was fourteen hours.
+        host = decision.host if scope is not None else ""
+        retry_after_seconds = parse_retry_after(retry_after)
+        pause_host = getattr(scope, "pause_host", None)
+        try:
+            if callable(pause_host):
+                pause_host(host, retry_after_seconds)
+        except Exception:  # pragma: no cover - the scope may be a double
+            pass
         bucket_for = getattr(scope, "bucket_for", None)
         penalise = getattr(scope, "penalise", None)
         try:
             if callable(penalise):
-                penalise(decision.host)
+                penalise(host)
             elif callable(bucket_for):
-                bucket_for(decision.host).penalise()
+                bucket_for(host).penalise()
         except Exception:  # pragma: no cover - the scope may be a double
             pass
 
@@ -500,6 +551,7 @@ async def _fetch_document(url: str, request: ScanRequest, *, limit: int = MAX_AS
         content_type=content_type,
         size_bytes=len(read),
         text=read.decode(encoding, errors="replace"),
+        retry_after_seconds=retry_after_seconds,
     )
 
 
@@ -696,6 +748,12 @@ async def asset_crawl_executor(request: ScanRequest) -> ScanResult:
     #: said no; the crawl stops asking it, rather than becoming the
     #: traffic that gets it blocked for good.
     refused: set[str] = set()
+    #: The hosts that have asked the scan to slow down.  A 429 is not a
+    #: refusal, but the answer is the same for the rest of the crawl:
+    #: the host said how long it wants to be left alone, and a crawl
+    #: that waits fourteen hours inside a scan is a crawl that never
+    #: finishes.
+    throttled: set[str] = set()
     while queue:
         if len(assets) >= ASSET_LIMIT:
             break
@@ -711,6 +769,11 @@ async def asset_crawl_executor(request: ScanRequest) -> ScanResult:
         if host in refused:
             # The host has already refused.  The reference is recorded
             # and nothing more is asked of it.
+            continue
+        if host in throttled:
+            # The host asked the scan to slow down.  It is not asked
+            # again in this scan.
+            item["throttled"] = True
             continue
 
         document = await _fetch_document(raw, request)
@@ -736,6 +799,18 @@ async def asset_crawl_executor(request: ScanRequest) -> ScanResult:
             refused.add(host)
             errors.append(f"{url}: the target refused the scan ({document.status_code})")
             item["refused"] = True
+
+        if document.status_code == 429 and host:
+            # The host asked the scan to slow down, and said for how
+            # long.  The scope holds the pause; the crawl leaves the
+            # host alone for the rest of the scan.
+            throttled.add(host)
+            item["throttled"] = True
+            errors.append(
+                f"{url}: the target asked the scan to slow down "
+                f"({document.retry_after_seconds:.0f}s)"
+            )
+            continue
 
         # The routes a bundle names are not links a crawler follows: they
         # are strings inside the script.  The body is in hand, so they are

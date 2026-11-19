@@ -21,6 +21,13 @@ def test_a_queue_name_carries_the_worker_identity():
     assert identity_from_queue("") == ""
 
 
+class FakeQueue:
+    """A queue with the consumers that are listening to it."""
+
+    def __init__(self, consumers: int) -> None:
+        self.online_consumers_count = consumers
+
+
 class FakeBackend:
     """A backend whose consumers are invisible and whose queues are not."""
 
@@ -38,7 +45,10 @@ class FakeState:
 
     @property
     def queues(self):
-        return {name: [] for name in self.backend._queues}
+        return {
+            name: FakeQueue(consumers)
+            for name, consumers in self.backend._queues.items()
+        }
 
 
 def _bridge(consumers, queues, monkeypatch):
@@ -56,13 +66,21 @@ def _bridge(consumers, queues, monkeypatch):
 def test_a_worker_with_an_unnamed_client_is_still_seen(monkeypatch):
     # The client is called "redis-py" and the identity is unknown, but the
     # worker is bound to a queue that carries its name.
-    bridge = _bridge({}, ["normal:B-Hunters-ParamSpider"], monkeypatch)
+    bridge = _bridge({}, {"normal:B-Hunters-ParamSpider": 1}, monkeypatch)
 
     assert "B-Hunters-ParamSpider" in bridge.online_identities()
 
 
+def test_a_bound_queue_with_nobody_listening_is_not_a_worker(monkeypatch):
+    # The bind is left behind by a worker that has stopped.  Counting it
+    # as online is what made a scan wait for tasks nobody would take.
+    bridge = _bridge({}, {"normal:B-Hunters-ParamSpider": 0}, monkeypatch)
+
+    assert bridge.online_identities() == []
+
+
 def test_the_client_names_are_seen_too(monkeypatch):
-    bridge = _bridge({"B-Hunters-Katana": []}, [], monkeypatch)
+    bridge = _bridge({"B-Hunters-Katana": []}, {}, monkeypatch)
 
     assert "B-Hunters-Katana" in bridge.online_identities()
 

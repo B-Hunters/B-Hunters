@@ -29,7 +29,19 @@ def test_the_retention_job_removes_what_has_expired(settings):
     events = database.collection("platform_scan_events")
     artefacts = database.collection("platform_artifacts")
 
-    events.insert_one({"at": 0, "scan_id": "expired-scan", "kind": "scan.created"})
+    events.delete_many({"scan_id": "expired-scan"})
+    artefacts.delete_many({"scan_id": "expired-scan"})
+
+    # An event carries an identifier of its own: the index on it is
+    # what makes writing the same event twice harmless.
+    events.insert_one(
+        {
+            "event_id": "expired-scan:scan.created:1",
+            "at": 0,
+            "scan_id": "expired-scan",
+            "kind": "scan.created",
+        }
+    )
     artefacts.insert_one({"created_at": 0, "scan_id": "expired-scan", "kind": "file"})
 
     removed = database.apply_retention(event_retention_days=1, artifact_retention_days=1)
@@ -44,11 +56,22 @@ def test_the_retention_job_keeps_what_is_current(settings):
     database = _database(settings)
     events = database.collection("platform_scan_events")
 
-    events.insert_one({"at": 9_999_999_999, "scan_id": "current-scan", "kind": "scan.created"})
+    # The test database is shared, so what an earlier run left behind
+    # is cleared first: the count below is about this run.
+    events.delete_many({"scan_id": "current-scan"})
+    events.insert_one(
+        {
+            "event_id": "current-scan:scan.created:1",
+            "at": 9_999_999_999,
+            "scan_id": "current-scan",
+            "kind": "scan.created",
+        }
+    )
 
     database.apply_retention(event_retention_days=3650, artifact_retention_days=3650)
 
     assert events.count_documents({"scan_id": "current-scan"}) == 1
+    events.delete_many({"scan_id": "current-scan"})
 
 
 def test_the_runner_calls_the_retention_job():

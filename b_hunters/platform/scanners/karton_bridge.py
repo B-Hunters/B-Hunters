@@ -434,11 +434,52 @@ class KartonWorkerBridge:
         results.report_id = report_id
         results.consumed = True
 
-        report = self.db.collection("reports").find_one({"_id": ObjectId(report_id)}) or {}
-        results.findings = collect_from_report(report)
-        results.services = services_from_report(report)
+        # The discovery worker gives every host it finds a report of its
+        # own, so the findings of a subdomain live in that report and not
+        # in the one of the target.  A platform that reads only the
+        # report of the target reads only the findings of the target.
+        report_ids = self._report_ids_for_scan(target.legacy_scan_id) or [report_id]
+        for one in report_ids:
+            document = self._report_document(one)
+            if not document:
+                continue
+            results.findings.extend(collect_from_report(document))
+            results.services.extend(services_from_report(document))
         self._count_findings(target.platform_scan_id, results.findings)
         return results
+
+    def _report_ids_for_scan(self, legacy_scan_id: str) -> list[str]:
+        """Every report document the scan produced.
+
+        The workers record the report of a host in the ``domains``
+        document of that host, and every document of a scan carries the
+        scan's identifier, so the reports of a scan are the ones that
+        belong to it.
+        """
+        if not legacy_scan_id:
+            return []
+        found: list[str] = []
+        try:
+            cursor = self.db.collection("domains").find(
+                {"Scanid": legacy_scan_id}, {"report_id": 1}
+            )
+        except Exception:  # pragma: no cover - the database may be down
+            return []
+        for document in cursor:
+            report_id = document.get("report_id")
+            if not report_id:
+                continue
+            value = str(report_id)
+            if value not in found:
+                found.append(value)
+        return found
+
+    def _report_document(self, report_id: str) -> dict[str, Any]:
+        """The report document with that identifier, or nothing."""
+        try:
+            return self.db.collection("reports").find_one({"_id": ObjectId(report_id)}) or {}
+        except Exception:  # pragma: no cover - a malformed identifier
+            return {}
 
     def _count_findings(self, scan_id: str, findings: list[dict[str, Any]]) -> None:
         """Count the findings every worker produced.

@@ -622,13 +622,27 @@ async def stop_scan(
     A scan that is still queued has not run at all: its job is cancelled,
     so it never starts.  A scan that is already running notices the
     ``stopping`` status through the database and stops on its own.
+
+    A scan that never ran is cancelled here, because nobody else will
+    cancel it: the runner that would have noticed the stop is not going
+    to run.  A scan that says ``stopping`` for ever is a scan that never
+    ended - and the console cannot tell it from one that is still going.
     """
     scan = services.scans.get(scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="the scan does not exist")
 
+    status = str(getattr(scan, "status", "") or "")
+    if status in {"completed", "failed", "cancelled"}:
+        # The scan is already over.  There is nothing to stop.
+        return {"status": status, "scan_id": scan_id}
+
     job = services.jobs.find_live(scan_id)
+    running = False
     if job is not None:
+        # A job that a runner has taken is running or about to run, and
+        # that runner is the one that will cancel the scan.
+        running = str(job.get("status", "")) in {"leased", "running"}
         services.jobs.cancel(job["job_id"])
     services.scans.set_status(scan_id, "stopping")
     for task in services.tasks.list_for_scan(scan_id):
@@ -640,6 +654,14 @@ async def stop_scan(
         payload={"at": time.time(), "job_id": job["job_id"] if job else ""},
         actor=user.username,
     )
+    if not running:
+        services.scans.set_status(scan_id, "cancelled")
+        services.events.append(
+            scan_id=scan_id,
+            kind="scan.cancelled",
+            payload={"at": time.time()},
+            actor=user.username,
+        )
     services.audit.record(
         action="scan.stop",
         actor=user.username,
@@ -647,7 +669,7 @@ async def stop_scan(
         target_id=scan_id,
         ip_address=request.client.host if request.client else "",
     )
-    return {"status": "stopping", "scan_id": scan_id}
+    return {"status": "stopping" if running else "cancelled", "scan_id": scan_id}
 
 
 @router.get("/{scan_id}/events")

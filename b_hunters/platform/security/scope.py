@@ -278,6 +278,10 @@ class ScopeEnforcer:
         self._started_at = time.monotonic()
         self.violations: list[dict] = []
         self._violations_lock = threading.Lock()
+        #: The hosts that asked the scan to slow down, and the moment
+        #: each of them said it would take requests again.
+        self._paused: dict[str, float] = {}
+        self._paused_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Time / concurrency budget
@@ -428,6 +432,61 @@ class ScopeEnforcer:
 
     def throttle(self, host: str, timeout: float = 30.0) -> bool:
         return self.bucket_for(host).acquire(timeout=timeout)
+
+    # ------------------------------------------------------------------
+    # The hosts that asked the scan to slow down
+    # ------------------------------------------------------------------
+    def pause_host(self, host: str, seconds: float) -> float:
+        """Record that a host asked the scan to wait before it asks again.
+
+        A host that answers ``429 Too Many Requests`` says when it will
+        take requests again, in the ``Retry-After`` header.  The scan
+        keeps that answer and stops asking until the moment passes: a
+        host that has said "not now" and is asked again anyway is how a
+        rate limit becomes a block that lasts for hours.
+
+        A pause that is already running is not shortened - the host said
+        when it would take requests again, and that is the only answer
+        that matters.
+        """
+        key = _normalize_host(host)
+        if not key:
+            return 0.0
+        try:
+            seconds = max(0.0, float(seconds))
+        except (TypeError, ValueError):
+            return 0.0
+        with self._paused_lock:
+            deadline = time.monotonic() + seconds
+            if deadline > self._paused.get(key, 0.0):
+                self._paused[key] = deadline
+            return max(0.0, self._paused[key] - time.monotonic())
+
+    def paused_seconds(self, host: str) -> float:
+        """How long the host asked the scan to wait; ``0`` when it did not."""
+        key = _normalize_host(host)
+        if not key:
+            return 0.0
+        with self._paused_lock:
+            deadline = self._paused.get(key)
+        if deadline is None:
+            return 0.0
+        return max(0.0, deadline - time.monotonic())
+
+    def is_paused(self, host: str) -> bool:
+        """Whether the host asked the scan to wait and the moment has not come."""
+        return self.paused_seconds(host) > 0.0
+
+    def paused_hosts(self) -> dict[str, float]:
+        """The hosts that asked the scan to wait, and for how long."""
+        with self._paused_lock:
+            deadlines = dict(self._paused)
+        now = time.monotonic()
+        return {
+            host: max(0.0, deadline - now)
+            for host, deadline in deadlines.items()
+            if deadline > now
+        }
 
     # ------------------------------------------------------------------
     # Redirect handling

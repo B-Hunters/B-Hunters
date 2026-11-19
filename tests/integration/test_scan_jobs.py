@@ -91,6 +91,36 @@ def test_stopping_a_queued_scan_cancels_its_job(client, csrf, services):
     assert services.scans.get(scan_id).status in {"stopping", "cancelled"}
 
 
+def test_a_queued_scan_that_is_stopped_ends(client, csrf, services):
+    """A scan that never ran is cancelled by the stop.
+
+    The runner that would have noticed the stop is not going to run: the
+    job is cancelled before it is ever taken.  A scan that says
+    ``stopping`` for ever is a scan that never ended, and the console
+    cannot tell it from one that is still going.
+    """
+    scan_id = _create_scan(client, csrf)
+    client.post(f"/api/v1/scans/{scan_id}/start", headers={"X-CSRF-Token": csrf})
+
+    response = client.post(f"/api/v1/scans/{scan_id}/stop", headers={"X-CSRF-Token": csrf})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    assert services.scans.get(scan_id).status == "cancelled"
+
+
+def test_a_scan_that_is_already_over_is_left_alone(client, csrf, services):
+    scan_id = _create_scan(client, csrf)
+    client.post(f"/api/v1/scans/{scan_id}/start", headers={"X-CSRF-Token": csrf})
+    client.post(f"/api/v1/scans/{scan_id}/stop", headers={"X-CSRF-Token": csrf})
+
+    response = client.post(f"/api/v1/scans/{scan_id}/stop", headers={"X-CSRF-Token": csrf})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    assert services.scans.get(scan_id).status == "cancelled"
+
+
 def test_a_created_scan_carries_its_keys(client, csrf, services):
     scan_id = _create_scan(client, csrf)
     scan = services.scans.get(scan_id)

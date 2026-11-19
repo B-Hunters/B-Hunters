@@ -69,6 +69,13 @@ class FakeCollection:
                 return document
         return None
 
+    def find(self, query: dict[str, Any], projection: dict[str, Any] | None = None):
+        return [
+            document
+            for document in self.documents
+            if all(document.get(key) == value for key, value in query.items())
+        ]
+
 
 class FakeDatabase:
     def __init__(self, collections: dict[str, FakeCollection]) -> None:
@@ -193,6 +200,66 @@ class TestCollect:
         assert results.report_id == str(report_oid)
         assert [f["title"] for f in results.findings]
         assert results.services
+
+    def test_the_findings_of_every_report_of_the_scan_are_returned(self) -> None:
+        """A host the discovery found has a report of its own.
+
+        The workers write what they find into the report of the host
+        they scanned, and the discovery worker gives every host it finds
+        a report.  A platform that reads only the report of the target
+        reads only the findings of the target.
+        """
+        target_oid = ObjectId()
+        subdomain_oid = ObjectId()
+        target_report = {
+            "_id": target_oid,
+            "Vulns": {"Nuclei": ["exposed-panel\nhttp://demo.test/admin"]},
+            "Ports": [],
+            "Technology": {},
+        }
+        subdomain_report = {
+            "_id": subdomain_oid,
+            "Vulns": {"Nuclei": ["open-redirect\nhttp://api.demo.test/next"]},
+            "Ports": [],
+            "Technology": {},
+        }
+        domains = [
+            {
+                "Scanid": "6ad9739f61d70e848ebac739",
+                "Domain": "demo.test",
+                "report_id": str(target_oid),
+                "status": {"processing": [], "finished": ["B-Hunters-Nuclei"]},
+            },
+            {
+                "Scanid": "6ad9739f61d70e848ebac739",
+                "Domain": "api.demo.test",
+                "report_id": str(subdomain_oid),
+                "status": {"processing": [], "finished": ["B-Hunters-Nuclei"]},
+            },
+        ]
+        database = FakeDatabase(
+            {
+                "scans": FakeCollection(),
+                "reports": FakeCollection([target_report, subdomain_report]),
+                "domains": FakeCollection(domains),
+            }
+        )
+        bridge = KartonWorkerBridge(
+            producer=FakeProducer(),
+            database=database,
+            poll_seconds=0.0,
+        )
+        target = WorkerTarget(
+            url="https://demo.test/",
+            domain="demo.test",
+            legacy_scan_id="6ad9739f61d70e848ebac739",
+        )
+
+        results = bridge.collect(target, deadline=0.0)
+
+        titles = [f["title"] for f in results.findings]
+        assert "exposed-panel" in titles
+        assert "open-redirect" in titles
 
     def test_an_unconsumed_task_is_reported_as_such(self) -> None:
         bridge = KartonWorkerBridge(

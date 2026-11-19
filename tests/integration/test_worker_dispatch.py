@@ -29,14 +29,26 @@ class FakeBridge:
         self.prepared: list[WorkerTarget] = []
         self.dispatched: list[WorkerTarget] = []
         self.dispatched_roles: list[str] = []
+        #: The workers the fake says are online.
+        self.online: list[str] = []
 
-    def prepare(self, *, url: str, description: str = "", platform_scan_id: str = "") -> WorkerTarget:
+    def prepare(
+        self,
+        *,
+        url: str,
+        description: str = "",
+        platform_scan_id: str = "",
+        denied_hosts: Any = (),
+        enabled_workers: Any = (),
+    ) -> WorkerTarget:
         from b_hunters.platform.scanners.karton_bridge import normalize_target
 
         target = WorkerTarget(
             url=url,
             domain=normalize_target(url),
             legacy_scan_id=f"legacy-{len(self.prepared)}",
+            denied_hosts=tuple(denied_hosts or ()),
+            enabled_workers=tuple(enabled_workers or ()),
         )
         self.prepared.append(target)
         return target
@@ -49,12 +61,20 @@ class FakeBridge:
         self.dispatched_roles.append("B-Hunters-" + target.domain.split(":")[0])
         return f"root-{target.domain}"
 
+    def online_identities(self) -> list[str]:
+        return list(self.online)
+
+    def worker_outcomes(self, scan_id: str) -> list[dict[str, Any]]:
+        return []
+
     def collect(
         self,
         target: WorkerTarget,
         *,
         root_uid: str = "",
         deadline: float | None = None,
+        should_stop: Any = None,
+        online: Any = None,
     ) -> WorkerResults:
         for entry in self.results:
             if entry.get("domain") == target.domain:
