@@ -36,6 +36,10 @@ log = logging.getLogger(__name__)
 #: How often the retention job runs, in seconds.
 RETENTION_INTERVAL_SECONDS = 3600
 
+#: How often the runner reconciles the scans that were stopped and
+#: never finished, in seconds.
+RECONCILE_INTERVAL_SECONDS = 30
+
 #: The kinds of job the runner claims.
 RUNNER_JOB_KINDS = ("scan", "benchmark")
 
@@ -375,6 +379,7 @@ class Runner:
     async def run_forever(self) -> None:
         """Run jobs until the runner is drained."""
         last_retention = 0.0
+        last_reconcile = 0.0
         while not self._drained:
             if self._drain_requested():
                 log.info("the runner was asked to drain; it will not claim new jobs")
@@ -390,6 +395,49 @@ class Runner:
             if now - last_retention >= RETENTION_INTERVAL_SECONDS:
                 last_retention = now
                 self.apply_retention()
+            # A scan that was stopped and never finished says "stopping"
+            # for ever, because the runner that would have finished it
+            # is not there any more.
+            if now - last_reconcile >= RECONCILE_INTERVAL_SECONDS:
+                last_reconcile = now
+                self.reconcile_stopped_scans()
+
+    def reconcile_stopped_scans(self) -> list[str]:
+        """Finish the scans that were stopped and never finished.
+
+        A scan that is stopped while its job is running is finished by
+        the runner that owns it - but a runner that dies mid-scan, or a
+        job that is cancelled before the orchestrator notices, leaves the
+        scan saying ``stopping`` for ever.  Nothing else will ever move
+        it: the job is over, so no runner will pick it up again.
+
+        The job is what says whether a scan is still going.  A scan with
+        a live job is left alone, because the runner that owns that job
+        is the one that will finish it.
+        """
+        finished: list[str] = []
+        try:
+            scans = self.services.scans.list(status="stopping", limit=100)
+        except Exception:  # pragma: no cover - the database may be down
+            log.exception("could not read the scans that are stopping")
+            return finished
+        for scan in scans:
+            try:
+                if self.services.jobs.find_live(scan.scan_id) is not None:
+                    continue
+                self.services.scans.set_status(scan.scan_id, "cancelled")
+                self.services.events.append(
+                    scan_id=scan.scan_id,
+                    kind="scan.cancelled",
+                    payload={"at": time.time(), "reason": "the job of the scan is over"},
+                    actor="runner",
+                )
+            except Exception:  # pragma: no cover - the database may be down
+                log.exception("could not finish the scan %s", scan.scan_id)
+                continue
+            log.info("the scan %s was stopped and its job is over; it is cancelled", scan.scan_id)
+            finished.append(scan.scan_id)
+        return finished
 
     def apply_retention(self) -> dict[str, int]:
         """Delete the events and the artefacts that have expired."""

@@ -39,6 +39,13 @@ def create_scan_from_template(
         excluded_paths=list(targets.get("excluded_paths") or []),
         allow_private_network=bool(payload.get("test_environment", False)),
         allow_state_changing=bool(payload.get("allow_state_changing", False)),
+        # The hosts the scan must not touch.  A schedule is a scan
+        # request that is stored and replayed, so it carries the
+        # exclusions of the programme the same way a scan an operator
+        # started by hand does - without this, a scheduled scan had no
+        # exclusions at all and the workers went for the hosts the
+        # programme names as out of scope.
+        denied_hosts=list(targets.get("denied_hosts") or []),
     )
     profile = _profile_for(
         payload.get("profile", "standard"),
@@ -60,6 +67,7 @@ def create_scan_from_template(
         profile=profile,
         accepted_urls=result["accepted_urls"],
         authorized_hosts=result["authorized_hosts"],
+        denied_hosts=result["denied_hosts"],
         description=str(payload.get("description", "")),
         created_by="schedule",
     )

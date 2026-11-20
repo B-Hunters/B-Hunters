@@ -1,0 +1,262 @@
+scan 6c461464-c19b-42d7-b6c7-f96038dcc96d: rapyd scope check (full fleet, no nuclei)
+  phase   : completed
+  status  : completed
+  scope   : {"authorized_hosts": ["*.rapyd.net", "rapyd.net"], "denied_hosts": ["community.rapyd.net", "support.rapyd.net", "docs.rapyd.net", "sandbox.rapyd.net", "ghost.rapyd.net"], "excluded_paths": [], "allow_private_network": false, "allow_state_changing": false, "max_requests_per_second": 5.0, "max_concurrency": 3, "request_timeout": 20.0, "max_duration_seconds": 3000}
+  error   : -
+
+=== the events, in order ===
+   {"events": [{"seq": 1, "event_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d:scan.queued:c8bea042-840c-4c07-a23a-68e1397f1539", "kind": "scan.queued", "at": 1795132200.9453814, "actor": "schedule", "payload": {"schedule_id": "sched-1795131626457-73254"}}, {"seq": 2, "event_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d:scan.started:0463d2b2-8ae5-430a-9c7b-7069c57db228", "kind": "scan.started", "at": 17951
+
+=== PHASE 1 - the workers ===
+  scan_id: "6c461464-c19b-42d7-b6c7-f96038dcc96d"
+  workers: 18 item(s)
+      {"worker": "B-Hunters-DalFox", "participated": false, "reason": "never dispatched", "tasks": 0, "items": 0, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}
+      {"worker": "B-Hunters-Ffuf", "participated": false, "reason": "never dispatched", "tasks": 0, "items": 0, "findings": 0, "crashed_tasks": 0, "expected_version": "", "connected_at_scan_start": true}
+      {"worker": "B-Hunters-GoWitness", "participated": true, "reason": "ran, found nothing", "tasks": 1, "items": 8, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}
+      {"worker": "B-Hunters-Katana", "participated": true, "reason": "ran, found nothing", "tasks": 1, "items": 0, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}
+      {"worker": "B-Hunters-Nmap", "participated": true, "reason": "ran, found nothing", "tasks": 1, "items": 2, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}
+      {"worker": "B-Hunters-Nuclei", "participated": false, "reason": "not connected", "tasks": 0, "items": 0, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": false}
+      {"worker": "B-Hunters-ParamSpider", "participated": true, "reason": "ran, found nothing", "tasks": 1, "items": 221, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}
+      {"worker": "B-Hunters-SQLMap", "participated": false, "reason": "never dispatched", "tasks": 0, "items": 0, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}
+      ... and 10 more
+  native_adapters: 9 item(s)
+      {"name": "service_fingerprint", "version": "1.0.0", "status": "succeeded", "participated": true, "items": 1, "findings": 0}
+      {"name": "security_headers", "version": "1.0.0", "status": "succeeded", "participated": true, "items": 1, "findings": 3}
+      {"name": "tls_configuration", "version": "1.0.0", "status": "succeeded", "participated": true, "items": 1, "findings": 0}
+      {"name": "secret_scan", "version": "1.0.0", "status": "succeeded", "participated": true, "items": 0, "findings": 0}
+      {"name": "openapi_discovery", "version": "1.0.0", "status": "succeeded", "participated": true, "items": 1, "findings": 0}
+      {"name": "graphql_analysis", "version": "1.0.0", "status": "succeeded", "participated": true, "items": 1, "findings": 0}
+      {"name": "dependency_analysis", "version": "1.0.0", "status": "not selected", "participated": false, "items": 0, "findings": 0}
+      {"name": "browser_crawl", "version": "1.0.0", "status": "failed", "participated": true, "items": 500, "findings": 0}
+      ... and 1 more
+  coverage: {"workers": {"total": 18, "participated": 9, "did_not": 8, "not_connected": 1}, "native_adapters": {"total": 9, "participated": 8, "did_not": 1, "not_selected": 1}, "line": "18 workers and 9 native adapters: 17 participated, 9 did not, 1 was not connected"}
+  health: {"online_at_scan_start": ["B-Hunters-DalFox", "B-Hunters-Ffuf", "B-Hunters-GoWitness", "B-Hunters-Katana", "B-Hunters-Nmap", "B-Hunters-ParamSpider", "B-Hunters-SQLMap", "B-Hunters-SSTI-Checker", "B-Hunters-dirsearch", "B-Hunters-getjs", "B-Hunters-jsscanner", "B-Hunters-subrecon", "B-Hunters-wapiti", "B-Hunters-wayback", "B-Hunters-web-t
+
+=== PHASE 1 - what the workers wrote ===
+  scan_id: "6c461464-c19b-42d7-b6c7-f96038dcc96d"
+  items: 258 item(s)
+      {"scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "worker": "B-Hunters-Nmap", "kind": "port", "value": "{\"target\": \"rapyd.net\", \"ports\": [\"Port: 80 ,State: open ,Product: AWS Elastic Load Balancing  ,Script: {'h
+      {"scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "worker": "B-Hunters-Nmap", "kind": "technology", "value": "{\"rapyd.net\": [\"AWS Elastic Load Balancing\", \"\"]}", "source": "6aff8ca31d323bf00691a08a", "created_at"
+      {"scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "worker": "B-Hunters-web-technology", "kind": "technology", "value": "{\"https://rapyd.net\": [[\"Search engines\", \"Addsearch\", \"\"], [\"CDN\", \"Amazon S3\", \"\"]
+      {"scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "worker": "B-Hunters-ParamSpider", "kind": "url", "value": "https://www.rapyd.net/?p=FUZZ", "source": "6aff8ca31d323bf00691a08a", "created_at": 1795132880.8335505}
+      {"scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "worker": "B-Hunters-ParamSpider", "kind": "url", "value": "https://www.rapyd.net/company/careers/?utm_source=FUZZ&utm_medium=FUZZ&utm_content=FUZZ", "source": "6aff8ca
+      {"scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "worker": "B-Hunters-ParamSpider", "kind": "url", "value": "https://www.rapyd.net/is/?pageID=FUZZ", "source": "6aff8ca31d323bf00691a08a", "created_at": 1795132880.83355
+      {"scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "worker": "B-Hunters-ParamSpider", "kind": "url", "value": "https://www.rapyd.net/?s=FUZZ", "source": "6aff8ca31d323bf00691a08a", "created_at": 1795132880.8335752}
+      {"scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "worker": "B-Hunters-ParamSpider", "kind": "url", "value": "https://www.rapyd.net/blog/which-is-the-best-woocommerce-payment-gateway-for-your-business/?obOrigUrl=FUZZ",
+      ... and 250 more
+  count: 258
+  counts: {"B-Hunters-Nmap": 2, "B-Hunters-web-technology": 1, "B-Hunters-ParamSpider": 221, "B-Hunters-jsscanner": 26, "B-Hunters-GoWitness": 8}
+
+=== PHASE 1 - the services ===
+  scan_id: "6c461464-c19b-42d7-b6c7-f96038dcc96d"
+  urls: 1 item(s)
+      {"scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "https://rapyd.net/", "cookies": [], "detector": "nmap:service", "favicon_hash": 0, "headers": {}, "host": "rapyd.net", "server": "", "services": [{"name": "AWS 
+  summary: {"services": [{"name": "AWS Elastic Load Balancing", "version": "", "category": "Network services", "count": 1, "urls": ["https://rapyd.net/"]}]}
+
+=== PHASE 1 - the assets ===
+  scan_id: "6c461464-c19b-42d7-b6c7-f96038dcc96d"
+  items: 2000 item(s)
+      {"asset_id": "fb9096c04fcf43b8ac62a5158fc95747", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://booking.com/", "host": "booking.com", "path": "/", "kind": "other", "scope": "external", "status_code": 0
+      {"asset_id": "7c2b933a245546f391005c2afd486777", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://developer.apple.com/tap-to-pay/regions", "host": "developer.apple.com", "path": "/tap-to-pay/regions", "k
+      {"asset_id": "7226818ab56c4368a4a04314d002269a", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://docs.rapyd.net/works-with/docs/plugins-for-rapyd-payments", "host": "docs.rapyd.net", "path": "/works-wit
+      {"asset_id": "c4721cd5653145c096f262e85d8dfbc1", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://gmpg.org/xfn/11", "host": "gmpg.org", "path": "/xfn/11", "kind": "other", "scope": "external", "status_co
+      {"asset_id": "c0174e242df446169ab46600921bcd6e", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://rapyd.net/", "host": "rapyd.net", "path": "/", "kind": "other", "scope": "first_party", "status_code": 0,
+      {"asset_id": "fb671ec2547e47ac9cf9086ea4be46c0", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://rapyd.net/img.aspx?q=FUZZ", "host": "rapyd.net", "path": "/img.aspx", "kind": "other", "scope": "first_pa
+      {"asset_id": "79c5cc4fc77347b9b9dce85c04e69568", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://www.google.com/policies/privacy/partners/", "host": "www.google.com", "path": "/policies/privacy/partners
+      {"asset_id": "d04a6b605dd14f3fa7cdeed136631341", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://www.heygotrade.com/", "host": "www.heygotrade.com", "path": "/", "kind": "other", "scope": "external", "s
+      ... and 1992 more
+  count: 2000
+  counts: {"page": 164, "js": 96, "image": 695, "css": 33, "api": 7, "other": 1248}
+
+=== PHASE 1 - the native adapters ===
+  scan_id: "6c461464-c19b-42d7-b6c7-f96038dcc96d"
+  report_id: "6aff8ca31d323bf00691a08a"
+  workers: 17 item(s)
+      {"worker": "B-Hunters-DalFox", "tasks": 0, "live_tasks": 203, "items": 0, "candidates": 4, "output": [], "status": "running"}
+      {"worker": "B-Hunters-Ffuf", "tasks": 0, "live_tasks": 4, "items": 0, "candidates": 4, "output": [], "status": "running"}
+      {"worker": "B-Hunters-GoWitness", "tasks": 1, "live_tasks": 139, "items": 1, "candidates": 4, "output": [{"field": "data.gowitness", "count": 1, "preview": "url: https://rapyd.net\nfinal_url: https://www.rapyd.net/\ntitl
+      {"worker": "B-Hunters-Katana", "tasks": 1, "live_tasks": 150, "items": 0, "candidates": 4, "output": [], "status": "ran, found nothing"}
+      {"worker": "B-Hunters-Nmap", "tasks": 1, "live_tasks": 218, "items": 2, "candidates": 4, "output": [{"field": "Ports", "count": 1, "preview": "    [{'target': 'rapyd.net', 'ports': [\"Port: 80 ,State: open ,Product: AWS 
+      {"worker": "B-Hunters-Nuclei", "tasks": 0, "live_tasks": 321, "items": 0, "candidates": 4, "output": [], "status": "running"}
+      {"worker": "B-Hunters-ParamSpider", "tasks": 1, "live_tasks": 130, "items": 221, "candidates": 4, "output": [{"field": "links", "count": 221, "preview": "    https://www.rapyd.net/?p=FUZZ\n    https://www.rapyd.net/compa
+      {"worker": "B-Hunters-SQLMap", "tasks": 0, "live_tasks": 409, "items": 0, "candidates": 4, "output": [], "status": "running"}
+      ... and 9 more
+  summary: {"crawled_urls": 221, "urls_with_parameters": 4}
+  participation: {"B-Hunters-subrecon": 1, "B-Hunters-Nmap": 1, "B-Hunters-web-technology": 1, "B-Hunters-Katana": 1, "B-Hunters-getjs": 1, "B-Hunters-jsscanner": 26, "B-Hunters-ParamSpider": 1, "B-Hunters-GoWitness": 1, "B-Hunters-dirsearch": 1}
+
+=== PHASE 2 - the agents ===
+  agents: 19 item(s)
+      {"role": "access_control", "instance_id": "access_control", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "conclusion": "No missing authorisation check was demonstrated. Every low-privilege (anonymous) request I mad
+      {"instance_id": "adjudicator", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "role": "adjudicator", "conclusion": "Reconciliation complete. 24 candidate findings collapsed into 16 distinct entries after deduplicatio
+      {"instance_id": "api", "role": "api", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "conclusion": "The target https://rapyd.net/ is a WordPress marketing site served through Pantheon Global Edge + Fastly/Varnish + C
+      {"role": "authn", "instance_id": "authn", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "conclusion": "I mapped the authentication surface of https://rapyd.net/ as far as the available tooling and scope permitted. T
+      {"instance_id": "javascript", "role": "javascript", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "conclusion": "I performed a partial static analysis of JavaScript belonging to https://rapyd.net/ (WordPress site on
+      {"instance_id": "recon", "role": "recon", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "conclusion": "Mapped the attack surface of rapyd.net from crawler output, worker technology/port results, and the asset graph.
+      {"instance_id": "scanner:asset_crawl", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "role": "scanner:asset_crawl", "conclusion": "2000 item(s), with errors", "detail": {}, "error": "", "last_seen_at": 1795132578.50
+      {"instance_id": "scanner:browser_crawl", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "role": "scanner:browser_crawl", "conclusion": "500 item(s), with errors", "detail": {}, "error": "", "last_seen_at": 1795132480
+      ... and 11 more
+
+=== PHASE 2 - the agent report ===
+  scan_id: "6c461464-c19b-42d7-b6c7-f96038dcc96d"
+  roles: 11 item(s)
+      {"role": "recon", "tasks": 1, "status": "succeeded", "stop_reason": "completed", "rounds": 5, "tool_calls": 12, "tokens": 77676, "findings_raised": 0, "findings_confirmed": 0, "conclusion": "Mapped the attack surface of 
+      {"role": "javascript", "tasks": 1, "status": "succeeded", "stop_reason": "completed", "rounds": 7, "tool_calls": 9, "tokens": 127825, "findings_raised": 0, "findings_confirmed": 0, "conclusion": "I performed a partial st
+      {"role": "api", "tasks": 1, "status": "succeeded", "stop_reason": "completed", "rounds": 8, "tool_calls": 13, "tokens": 168690, "findings_raised": 6, "findings_confirmed": 4, "conclusion": "The target https://rapyd.net/ 
+      {"role": "authn", "tasks": 1, "status": "succeeded", "stop_reason": "completed", "rounds": 10, "tool_calls": 15, "tokens": 213906, "findings_raised": 0, "findings_confirmed": 0, "conclusion": "I mapped the authentication
+      {"role": "access_control", "tasks": 1, "status": "succeeded", "stop_reason": "completed", "rounds": 7, "tool_calls": 14, "tokens": 130408, "findings_raised": 7, "findings_confirmed": 5, "conclusion": "No missing authoris
+      {"role": "vuln_injection", "tasks": 1, "status": "succeeded", "stop_reason": "completed", "rounds": 7, "tool_calls": 14, "tokens": 128126, "findings_raised": 4, "findings_confirmed": 3, "conclusion": "No SQL, NoSQL, comm
+      {"role": "vuln_xss", "tasks": 1, "status": "succeeded", "stop_reason": "completed", "rounds": 5, "tool_calls": 7, "tokens": 72451, "findings_raised": 3, "findings_confirmed": 2, "conclusion": "No cross-site scripting vul
+      {"role": "vuln_ssrf", "tasks": 1, "status": "succeeded", "stop_reason": "completed", "rounds": 5, "tool_calls": 10, "tokens": 65274, "findings_raised": 2, "findings_confirmed": 1, "conclusion": "I was unable to complete 
+      ... and 3 more
+  stop_reasons: {"completed": 11}
+  built_in_roles: 13
+  planned_roles: 11
+
+=== PHASE 3 - the findings ===
+  items: 24 item(s)
+      {"finding_id": "8440debc-9a80-4dbf-b826-160122c8065f", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "4af702169c9f126039a3864de0ebca3c", "title": "Unauthenticated REST index discloses high-privilege p
+      {"finding_id": "3557539d-ccfa-42b2-b392-e021bafc092b", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "b72aa97eb6a079f98db2153e25015719", "title": "Unauthenticated WordPress REST API index discloses th
+      {"finding_id": "9d1c22aa-4318-4474-af9b-d7a6023c8497", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "10ef3e84acf81f530c5473bb162488df", "title": "WordPress REST responses are publicly cacheable for 7
+      {"finding_id": "7e5f7c52-160b-40b3-a7ab-b7eb4923bfad", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "2b2ea56b609185e97c4cac8ca293b9d4", "title": "Internally undocumented REST routes advertised by the
+      {"finding_id": "8df8a145-429e-4892-982b-7eb230c81516", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "5ead95df86cd5f07f31d48fffe52fc13", "title": "Positive control: unauthenticated access to the Rapyd
+      {"finding_id": "93897c67-9317-4901-b0aa-5d4e79f49608", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "887ec051525b6218c510bd2ab6db8392", "title": "Coverage gap: the actual Rapyd payments API surface i
+      {"finding_id": "142ae89d-353b-423a-bd74-8e55102a4382", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "2431dcf2d7322dd43d2dea2dc070874f", "title": "Positive control: WordPress REST content and plugin-a
+      {"finding_id": "73b06339-922d-49bb-bef3-6ae97fd152f6", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "3d6bf06b5f75076fac93afdf4403ddf0", "title": "Information disclosure via server header", "summary":
+      {"finding_id": "998f9b53-20f0-4fe6-9976-91f00a4d7f6f", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "587a63b7babc0ea6ad0c1578ae34cf3f", "title": "Internal infrastructure identifiers disclosed in resp
+      {"finding_id": "f94b6341-0437-468b-9abc-9d64c9a0b169", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "8493e4a190ea8b567ca99974defb5777", "title": "Verified informational: third-party analytics/trackin
+      {"finding_id": "bd1927c1-e7e4-494e-9778-b8e12fdf939f", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "a7114ce29aa761fc4ef63d6b4ed9f2c8", "title": "Content endpoints are protected (Solid Security) - un
+      {"finding_id": "6c72c3dc-b5ac-48d5-a90c-88fc341a53cb", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "69d60b333e8a3619df9d182c05c83a65", "title": "WordPress REST API query parameters are unreachable f
+      ... and 12 more
+  count: 24
+  total: 24
+  severity_counts: {"critical": 0, "high": 0, "medium": 0, "low": 4, "info": 20}
+  class_counts: {"access_control": 3, "api_surface_exposure": 2, "coverage_gap": 3, "cache_configuration_issue": 1, "undocumented_endpoint": 1, "attack_surface_inventory": 1, "information_disclosure": 1, "injection_probe_negative": 1, "cache_authorization_confusion": 1, "noise": 1, "security_misconfiguration": 6, "injection_probe_blocked": 1, "ssrf": 1, 
+
+=== PHASE 4 - the report ===
+  scan: {"scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "name": "rapyd scope check (full fleet, no nuclei)", "status": "completed", "created_by": "schedule", "created_at": 1795132200.9427578, "updated_at": 1795134068.914893, "definition": {"description": "Rapyd public bug bounty scope (Bugcrowd): *.rapyd.net in scope.", "targets": ["https://r
+  generated_at: 1795134240.164304
+  finding_count: 24
+  findings: 24 item(s)
+      {"finding_id": "8440debc-9a80-4dbf-b826-160122c8065f", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "4af702169c9f126039a3864de0ebca3c", "title": "Unauthenticated REST index discloses high-privilege p
+      {"finding_id": "3557539d-ccfa-42b2-b392-e021bafc092b", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "b72aa97eb6a079f98db2153e25015719", "title": "Unauthenticated WordPress REST API index discloses th
+      {"finding_id": "9d1c22aa-4318-4474-af9b-d7a6023c8497", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "10ef3e84acf81f530c5473bb162488df", "title": "WordPress REST responses are publicly cacheable for 7
+      {"finding_id": "7e5f7c52-160b-40b3-a7ab-b7eb4923bfad", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "2b2ea56b609185e97c4cac8ca293b9d4", "title": "Internally undocumented REST routes advertised by the
+      {"finding_id": "8df8a145-429e-4892-982b-7eb230c81516", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "5ead95df86cd5f07f31d48fffe52fc13", "title": "Positive control: unauthenticated access to the Rapyd
+      {"finding_id": "93897c67-9317-4901-b0aa-5d4e79f49608", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "887ec051525b6218c510bd2ab6db8392", "title": "Coverage gap: the actual Rapyd payments API surface i
+      {"finding_id": "142ae89d-353b-423a-bd74-8e55102a4382", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "2431dcf2d7322dd43d2dea2dc070874f", "title": "Positive control: WordPress REST content and plugin-a
+      {"finding_id": "73b06339-922d-49bb-bef3-6ae97fd152f6", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "fingerprint": "3d6bf06b5f75076fac93afdf4403ddf0", "title": "Information disclosure via server header", "summary":
+      ... and 16 more
+  assets: 2000 item(s)
+      {"asset_id": "fb9096c04fcf43b8ac62a5158fc95747", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://booking.com/", "host": "booking.com", "path": "/", "kind": "other", "scope": "external", "status_code": 0
+      {"asset_id": "7c2b933a245546f391005c2afd486777", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://developer.apple.com/tap-to-pay/regions", "host": "developer.apple.com", "path": "/tap-to-pay/regions", "k
+      {"asset_id": "7226818ab56c4368a4a04314d002269a", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://docs.rapyd.net/works-with/docs/plugins-for-rapyd-payments", "host": "docs.rapyd.net", "path": "/works-wit
+      {"asset_id": "c4721cd5653145c096f262e85d8dfbc1", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://gmpg.org/xfn/11", "host": "gmpg.org", "path": "/xfn/11", "kind": "other", "scope": "external", "status_co
+      {"asset_id": "c0174e242df446169ab46600921bcd6e", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://rapyd.net/", "host": "rapyd.net", "path": "/", "kind": "other", "scope": "first_party", "status_code": 0,
+      {"asset_id": "fb671ec2547e47ac9cf9086ea4be46c0", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://rapyd.net/img.aspx?q=FUZZ", "host": "rapyd.net", "path": "/img.aspx", "kind": "other", "scope": "first_pa
+      {"asset_id": "79c5cc4fc77347b9b9dce85c04e69568", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://www.google.com/policies/privacy/partners/", "host": "www.google.com", "path": "/policies/privacy/partners
+      {"asset_id": "d04a6b605dd14f3fa7cdeed136631341", "scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "url": "http://www.heygotrade.com/", "host": "www.heygotrade.com", "path": "/", "kind": "other", "scope": "external", "s
+      ... and 1992 more
+  asset_counts: {"page": 164, "js": 96, "image": 695, "css": 33, "api": 7, "other": 1248}
+  participation: {"scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "workers": [{"worker": "B-Hunters-DalFox", "participated": false, "reason": "never dispatched", "tasks": 0, "items": 0, "findings": 0, "crashed_tasks": 0, "expected_version": "1.1.16", "connected_at_scan_start": true}, {"worker": "B-Hunters-Ffuf", "participated": false, "reason": "never 
+  agents: {"scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "roles": [{"role": "recon", "tasks": 1, "status": "succeeded", "stop_reason": "completed", "rounds": 5, "tool_calls": 12, "tokens": 77676, "findings_raised": 0, "findings_confirmed": 0, "conclusion": "Mapped the attack surface of rapyd.net from crawler output, worker technology/port resu
+  integrity: {"scan_id": "6c461464-c19b-42d7-b6c7-f96038dcc96d", "verdict": "fail", "unexplained": 5, "crash": 0, "by_class": {"http_status": 0, "connection": 0, "timeout": 14, "dns": 0, "scope": 0, "permission": 0, "unknown_tool": 0, "budget": 12, "arguments": 0, "crash": 0, "unexplained": 5}, "total": 31, "entries": [{"source": "tool_call", "detail"
+  transcript: 11 item(s)
+      {"role": "recon", "text": "[recon] tool list_assets (ok):\n{\"kind\": \"all\", \"count\": 200, \"by_kind\": {\"page\": 164, \"js\": 96, \"image\": 695, \"css\": 33, \"api\": 7, \"other\": 1248}, \"assets\": [{\"asset_id\
+      {"role": "javascript", "text": "[javascript] tool list_worker_output (ok):\n{\"count\": 100, \"items\": [{\"worker\": \"B-Hunters-Nmap\", \"kind\": \"port\", \"value\": \"{\\\"target\\\": \\\"rapyd.net\\\", \\\"ports\\\"
+      {"role": "api", "text": "[api] tool list_assets (ok):\n{\"kind\": \"all\", \"count\": 200, \"by_kind\": {\"page\": 164, \"js\": 96, \"image\": 695, \"css\": 33, \"api\": 7, \"other\": 1248}, \"assets\": [{\"asset_id\": \
+      {"role": "authn", "text": "[authn] tool http_request (ok):\n{\"status_code\": 200, \"reason\": \"OK\", \"url\": \"https://www.rapyd.net/\", \"final_url\": \"https://www.rapyd.net/\", \"redirect_chain\": [\"https://rapyd.
+      {"role": "access_control", "text": "", "omitted_bytes": 698149}
+      {"role": "vuln_injection", "text": "", "omitted_bytes": 1027415}
+      {"role": "vuln_xss", "text": "", "omitted_bytes": 391909}
+      {"role": "vuln_ssrf", "text": "", "omitted_bytes": 96849}
+      ... and 3 more
+  transcript_omitted_bytes: 3607078
+
+=== the integrity ===
+  scan_id: "6c461464-c19b-42d7-b6c7-f96038dcc96d"
+  verdict: "fail"
+  unexplained: 5
+  crash: 0
+  by_class: {"http_status": 0, "connection": 0, "timeout": 14, "dns": 0, "scope": 0, "permission": 0, "unknown_tool": 0, "budget": 12, "arguments": 0, "crash": 0, "unexplained": 5}
+  total: 31
+  entries: 31 item(s)
+      {"source": "tool_call", "detail": "scan concurrency or duration budget exhausted", "status": "", "class": "budget"}
+      {"source": "tool_call", "detail": "program 'echo' is not in the shell allow-list (awk, cat, curl, cut, diff, file, find, grep, head, jq, ls, md5sum, node, openssl, python3, rg, sed, sha256sum, sort, stat, tail, uniq, wc)
+      {"source": "tool_call", "detail": "scan concurrency or duration budget exhausted", "status": "", "class": "budget"}
+      {"source": "tool_call", "detail": "tool 'http_request' exceeded its 45s timeout", "status": "", "class": "timeout"}
+      {"source": "tool_call", "detail": "tool 'http_request' exceeded its 45s timeout", "status": "", "class": "timeout"}
+      {"source": "tool_call", "detail": "tool 'http_request' exceeded its 45s timeout", "status": "", "class": "timeout"}
+      {"source": "tool_call", "detail": "scan concurrency or duration budget exhausted", "status": "", "class": "budget"}
+      {"source": "tool_call", "detail": "tool 'http_request' failed: ConnectTimeout: ", "status": "", "class": "timeout"}
+      ... and 23 more
+  entries_count: 31
+  stored: {"unexplained": 5, "crash": 0, "failing": 5, "by_class": {"http_status": 0, "connection": 0, "timeout": 14, "dns": 0, "scope": 0, "permission": 0, "unknown_tool": 0, "budget": 12, "arguments": 0, "crash": 0, "unexplained": 5}, "total": 31, "verdict": "fail"}
+
+================================================================
+THE FINDINGS OF THE SCAN (24)
+================================================================
+
+by severity: low 4, info 20 (no critical, no high, no medium)
+by class   : security_misconfiguration 6, access_control 3, coverage_gap 3,
+             api_surface_exposure 2, undocumented_endpoint 1,
+             cache_authorization_confusion 1, cache_configuration_issue 1,
+             information_disclosure 1, attack_surface_inventory 1,
+             injection_probe_negative 1, injection_probe_blocked 1,
+             xss 1, ssrf 1, noise 1
+
+ [low  ] cache_authorization_confusion  WordPress REST responses are publicly
+         cacheable for 7 days with a Vary header that excludes Authorization
+ [info ] access_control   Positive control: WordPress REST content and
+         plugin-admin routes are gated for anonymous callers
+ [info ] security_misconfiguration  Missing permissions-policy header
+ [info ] security_misconfiguration  Missing x-content-type-options header
+ [low  ] undocumented_endpoint  Internally undocumented REST routes advertised by
+         the site itself: 5 Solid Security (ithemes-security) plugin namespaces
+ [info ] security_misconfiguration  Technologies identified
+ [info ] security_misconfiguration  Information disclosure via server header
+ [low  ] api_surface_exposure  Unauthenticated REST index discloses high-privilege
+         plugin namespaces, the application-password...
+ [info ] security_misconfiguration  api.rapyd.net returns Access-Control-Allow-Origin: *
+ [info ] injection_probe_negative  No SQL/NoSQL injection observed on the
+         WordPress search parameter (negative result)
+ [info ] security_misconfiguration  Internal infrastructure identifiers disclosed
+         in response headers
+ [info ] access_control   Positive control: unauthenticated access to the Rapyd
+         payments API is correctly rejected with 4xx
+ [info ] injection_probe_blocked  WordPress REST API query parameters are
+         unreachable for injection testing due to Solid Security
+ [info ] information_disclosure  Verified informational: third-party
+         analytics/tracking identifiers and an inconsistent oEmbed ...
+ [info ] attack_surface_inventory  Source-level suspicion (UNVERIFIED, no
+         file/line available): the plugin stack implied by the ex...
+ [info ] coverage_gap   Coverage gap: the actual Rapyd payments API surface is in
+         scope but was never characterised
+ [info ] xss   Negative result: WordPress REST content namespaces are
+         unreachable for reflection testing becau...
+ [info ] noise   Low-confidence path surfaced by parameter enumeration (/stable) -
+         likely a generic CMS false po...
+ [info ] access_control   Content endpoints are protected (Solid Security) -
+         unauthenticated user enumeration and page ac...
+ [info ] coverage_gap   Custom /resource-filter query parameters are an untested
+         SQL sink (probe timed out - inconclusi...
+ [info ] cache_configuration_issue  Publicly cacheable response (max-age=604800)
+         that also sets a cookie, with a duplicated Cookie ...
+ [low  ] api_surface_exposure  Unauthenticated WordPress REST API index discloses
+         the complete internal route and argument sch...
+ [info ] ssrf   SSRF hypothesis (UNVERIFIED): unauthenticated WordPress oEmbed
+         route accepts a caller-supplied ...
+ [info ] coverage_gap   Reflected XSS NOT confirmed on the WordPress search
+         parameter `?s=` - marker was processed serv...
+
+================================================================
+THE DISCOVERY
+================================================================
+
+The discovery worker ran the tools for the first time in the platform's
+path and found 1546 hosts of rapyd.net.  None of them was confirmed:
+the step that says which of them live is the Go httpx, and the PATH
+answered with the Python httpx of the platform, which refuses to run.
+The worker now calls the Go tool by its path, and the host is
+confirmed and handed to the rest of the fleet with a report of its own.
+
+  the discovery found 1546 host(s), 0 of them answering

@@ -90,6 +90,26 @@ def test_the_runner_turns_a_due_schedule_into_a_scan(services):
     assert services.schedules.get(schedule["schedule_id"])["last_scan_id"] == scan_id
 
 
+def test_a_scheduled_scan_keeps_its_exclusions(services):
+    """A schedule is a scan request that is replayed.
+
+    The hosts a scan must not touch travel with it, and a schedule that
+    dropped them had no exclusions at all: the workers went for the
+    hosts the programme names as out of scope.
+    """
+    from b_hunters.platform.scan_factory import create_scan_from_template
+
+    template = _template()
+    template["targets"]["denied_hosts"] = ["docs.demo.test", "support.demo.test"]
+
+    scan = create_scan_from_template(services, template=template, name="the nightly scan")
+
+    assert sorted(scan.scope.get("denied_hosts", [])) == [
+        "docs.demo.test",
+        "support.demo.test",
+    ]
+
+
 def test_a_scheduled_scan_is_comparable_with_a_requested_one(services):
     """A scheduled scan asks the same question as a requested one.
 

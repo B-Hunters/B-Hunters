@@ -126,3 +126,56 @@ def test_drain_stops_the_runner(services):
     runner.drain()
     asyncio.run(runner.run_once())
     assert services.jobs.list()[0]["status"] == "queued"
+
+
+def test_a_scan_that_was_stopped_and_never_finished_is_cancelled(services):
+    """A runner that dies mid-scan leaves the scan saying "stopping".
+
+    The job is over, so no runner will pick the scan up again, and
+    nothing else will ever move it: the console cannot tell it from a
+    scan that is still going.
+    """
+    from b_hunters.platform.scan_factory import create_scan_from_template
+
+    scan = create_scan_from_template(
+        services,
+        template={
+            "targets": {"urls": ["https://demo.test/"], "authorized_hosts": ["demo.test"]},
+            "profile": "standard",
+            "test_environment": True,
+        },
+        name="the scan that was stopped",
+    )
+    services.scans.set_status(scan.scan_id, "stopping")
+    # The job of the scan is over: it was cancelled, so no runner will
+    # take it again.
+    job = services.jobs.enqueue(kind="scan", payload={"scan_id": scan.scan_id})
+    services.jobs.cancel(job["job_id"])
+
+    runner = Runner(services, RunnerConfig(owner="runner-a"), RecordingExecutor())
+    finished = runner.reconcile_stopped_scans()
+
+    assert scan.scan_id in finished
+    assert services.scans.get(scan.scan_id).status == "cancelled"
+
+
+def test_a_scan_with_a_live_job_is_left_to_the_runner_that_owns_it(services):
+    from b_hunters.platform.scan_factory import create_scan_from_template
+
+    scan = create_scan_from_template(
+        services,
+        template={
+            "targets": {"urls": ["https://demo.test/"], "authorized_hosts": ["demo.test"]},
+            "profile": "standard",
+            "test_environment": True,
+        },
+        name="the scan that is still going",
+    )
+    services.scans.set_status(scan.scan_id, "stopping")
+    services.jobs.enqueue(kind="scan", payload={"scan_id": scan.scan_id})
+
+    runner = Runner(services, RunnerConfig(owner="runner-a"), RecordingExecutor())
+    finished = runner.reconcile_stopped_scans()
+
+    assert finished == []
+    assert services.scans.get(scan.scan_id).status == "stopping"
